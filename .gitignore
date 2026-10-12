@@ -1,0 +1,15 @@
+# 派生数据：由 prepare_docs.py 从 FastAPI 仓库生成，不入库
+# 想复现请先克隆 FastAPI 仓库，再运行 python3 prepare_docs.py
+docs-source/
+
+# 环境变量与密钥（Dify API Key 等）
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 系统文件
+.DS_Store
