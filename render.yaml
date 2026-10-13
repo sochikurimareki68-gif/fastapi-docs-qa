@@ -1,0 +1,23 @@
+# Render 蓝图（Blueprint）：把部署方式写成代码，推送仓库后在 Render 一键创建服务
+# 文档：https://render.com/docs/blueprint-spec
+#
+# 用法：Render 控制台 → New → Blueprint → 选择本仓库 → 填 DIFY_API_KEY → Apply
+#
+# 说明：server.py 同时是静态文件服务器，会把 index.html 和 /api/* 一起托管在
+# 同一个域名下，所以部署后访问根路径即是可用 Demo（无需另配前端域名）。
+
+services:
+  - type: web
+    name: fastapi-docs-qa
+    runtime: python
+    plan: free                      # 免费版 15 分钟无访问会休眠，下次访问约需 1 分钟唤醒
+    region: singapore               # 离国内最近；若提示区域不可用，删除本行改用默认区域
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py  # server.py 会读取环境变量 PORT 并监听 0.0.0.0
+    healthCheckPath: /api/health
+    envVars:
+      # 密钥只填在 Render 控制台，不写进代码、不提交仓库
+      - key: DIFY_API_KEY
+        sync: false
+      - key: DIFY_BASE
+        value: https://api.dify.ai/v1

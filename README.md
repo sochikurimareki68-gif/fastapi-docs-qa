@@ -37,8 +37,13 @@ SSE 流式回答 + metadata.retriever_resources（引用片段）
 | `server.py` | 后端代理：向 Dify 对话型应用转发 `/api/chat`（SSE 流式）并展示引用来源（`refs` 事件），内置来源校验 / 单 IP 限流 / 全站每日上限 / 请求体限制四层防护，会话与 Dify 会话映射由服务端管理，另提供 `/api/health` 与「新对话」`/api/chat/reset` |
 | `index.html` | 前端单页（零依赖、自包含）：三栏「RAG 检索工作台」——左侧导航与示例问题、中间文档式问答流（自研安全 Markdown/代码块渲染器，逐字流式）、右侧引用来源面板（按文档聚合 + 相关度得分条）；支持新对话重置与后端不可用时的明确提示，不返回模拟答案 |
 | `.env.example` | 环境变量示例 |
+| `render.yaml` | Render 蓝图：把部署方式写成代码，`New → Blueprint` 选仓库即可一键创建服务（密钥填在控制台） |
+| `Procfile` | 通用进程声明（`web: python server.py`），兼容 Render / Railway 等平台 |
+| `requirements.txt` | 无第三方依赖的占位文件，让平台识别为 Python 项目 |
 
 语料产物 `docs-source/` 由脚本生成，不入库；复现方式见脚本 docstring。
+
+> 部署提示：`server.py` 同时是静态文件服务器，会把 `index.html` 与 `/api/*` 托管在同一域名下，因此部署后访问 `https://<服务名>.onrender.com/` 即为可用 Demo（前端与后端同源，无需另配）。
 
 ## 快速开始
 
