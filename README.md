@@ -4,6 +4,10 @@
 
 > 当前状态：Dify 应用已发布，后端联调 + 前端实测通过（8 阶段计划进行到阶段 6 部署）
 
+**在线预览（前端界面）**：<https://sochikurimareki68-gif.github.io/fastapi-docs-qa/>
+
+> 说明：GitHub Pages 仅托管静态文件、没有后端，因此该预览页只展示界面；问答会明确提示「服务不可用」（不返回模拟答案）。可用的问答 demo 需等阶段 6 将 `server.py` 部署到 Render 等平台。
+
 ## 技术架构
 
 ```
