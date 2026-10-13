@@ -2,7 +2,7 @@
 
 基于 [Dify](https://dify.ai) 知识库的 RAG 问答系统：用户用自然语言提问 → 向量检索 FastAPI 官方中文文档 → 大模型生成答案 → 展示引用来源。
 
-> 当前状态：后端代理代码完成（8 阶段计划进行到阶段 4，待 Dify 应用密钥联调）
+> 当前状态：Dify 应用已发布，后端代理联调通过（8 阶段计划进行到阶段 5）
 
 ## 技术架构
 
@@ -10,7 +10,7 @@
 用户浏览器
    │  fetch /api/chat（HttpOnly Cookie 会话）
    ▼
-server.py（Python 标准库后端代理，Render 部署）   ← 阶段 4，代码完成待联调
+server.py（Python 标准库后端代理，Render 部署）   ← 阶段 4，联调通过
    │  转发请求，保管 API Key
    ▼
 Dify 对话型应用（关联知识库）
@@ -22,6 +22,7 @@ SSE 流式回答 + metadata.retriever_resources（引用片段）
 - **知识库**：FastAPI 官方中文教程 48 篇（约 333 KB，含 176 个还原的 Python 代码块）
 - **Embedding**：硅基流动 `BAAI/bge-m3`（语义检索，Top-K = 3）
 - **检索测试**：路径参数校验 / CORS / 后台任务 / OAuth2 / 文件上传 5 类问题均 top-1 命中对应文档
+- **后端联调**：SSE 流式（meta/delta/refs/done）、会话连续（conversation_id 服务端映射）、多文档引用（OAuth2 一题命中 2 篇）、越界问题拒答、新对话重置，均实测通过
 
 ## 仓库内容
 
@@ -53,8 +54,8 @@ python3 upload_docs.py --dataset-id <dataset_id> --reindex   # 索引失败后�
 
 - [x] 阶段 1：准备 —— Dify 账号、语料清洗、仓库初始化
 - [x] 阶段 2：知识库构建 —— 48/48 索引成功，检索验收通过
-- [ ] 阶段 3：Dify 对话型应用配置（系统 Prompt / 引用来源）
-- [x] 阶段 4：后端代理（复用[电商客服项目](https://github.com/sochikurimareki68-gif/ecommerce-ai-customer-service)框架，对接 Dify API；代码完成，待联调）
+- [x] 阶段 3：Dify 对话型应用配置 —— 系统 Prompt + DeepSeek V4.1 Flash（温度 0.2、关闭思考模式）+ 开场白 + 引用与归属
+- [x] 阶段 4：后端代理（复用[电商客服项目](https://github.com/sochikurimareki68-gif/ecommerce-ai-customer-service)框架，对接 Dify API；本地联调通过）
 - [ ] 阶段 5：前端（复用聊天 UI + 引用来源展示）
 - [ ] 阶段 6：部署上线（Render）
 - [ ] 阶段 7：效果评测（准确率 / 引用命中率 / 延迟）
