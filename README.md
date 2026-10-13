@@ -2,7 +2,7 @@
 
 基于 [Dify](https://dify.ai) 知识库的 RAG 问答系统：用户用自然语言提问 → 向量检索 FastAPI 官方中文文档 → 大模型生成答案 → 展示引用来源。
 
-> 当前状态：Dify 应用已发布，后端代理联调通过（8 阶段计划进行到阶段 5）
+> 当前状态：Dify 应用已发布，后端联调 + 前端实测通过（8 阶段计划进行到阶段 6 部署）
 
 ## 技术架构
 
@@ -31,6 +31,7 @@ SSE 流式回答 + metadata.retriever_resources（引用片段）
 | `prepare_docs.py` | 文档清洗脚本：把 FastAPI 仓库的 MkDocs 源码（代码宏、锚点、提示块、HTML 噪声）清洗为可导入知识库的 Markdown，并按来源 URL 还原代码块 |
 | `upload_docs.py` | 批量导入脚本：走 Dify Dataset API 推送语料（规避免费版单批 1 文件限制），支持限速退避与失败重索引 |
 | `server.py` | 后端代理：向 Dify 对话型应用转发 `/api/chat`（SSE 流式）并展示引用来源（`refs` 事件），内置来源校验 / 单 IP 限流 / 全站每日上限 / 请求体限制四层防护，会话与 Dify 会话映射由服务端管理，另提供 `/api/health` 与「新对话」`/api/chat/reset` |
+| `index.html` | 前端单页（零依赖、自包含）：三栏「RAG 检索工作台」——左侧导航与示例问题、中间文档式问答流（自研安全 Markdown/代码块渲染器，逐字流式）、右侧引用来源面板（按文档聚合 + 相关度得分条）；支持新对话重置与后端不可用时的明确提示，不返回模拟答案 |
 | `.env.example` | 环境变量示例 |
 
 语料产物 `docs-source/` 由脚本生成，不入库；复现方式见脚本 docstring。
@@ -56,7 +57,7 @@ python3 upload_docs.py --dataset-id <dataset_id> --reindex   # 索引失败后�
 - [x] 阶段 2：知识库构建 —— 48/48 索引成功，检索验收通过
 - [x] 阶段 3：Dify 对话型应用配置 —— 系统 Prompt + DeepSeek V4.1 Flash（温度 0.2、关闭思考模式）+ 开场白 + 引用与归属
 - [x] 阶段 4：后端代理（复用[电商客服项目](https://github.com/sochikurimareki68-gif/ecommerce-ai-customer-service)框架，对接 Dify API；本地联调通过）
-- [ ] 阶段 5：前端（复用聊天 UI + 引用来源展示）
+- [x] 阶段 5：前端 —— 全新「RAG 检索工作台」三栏界面（Markdown/代码块渲染 + 引用来源面板 + 相关度得分可视化），本地实测通过
 - [ ] 阶段 6：部署上线（Render）
 - [ ] 阶段 7：效果评测（准确率 / 引用命中率 / 延迟）
 - [ ] 阶段 8：文档收尾
