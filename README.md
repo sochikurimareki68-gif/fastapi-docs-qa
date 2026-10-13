@@ -2,11 +2,13 @@
 
 基于 [Dify](https://dify.ai) 知识库的 RAG 问答系统：用户用自然语言提问 → 向量检索 FastAPI 官方中文文档 → 大模型生成答案 → 展示引用来源。
 
-> 当前状态：Dify 应用已发布，后端联调 + 前端实测通过（8 阶段计划进行到阶段 6 部署）
+> 当前状态：已部署上线，线上问答链路实测通过（8 阶段计划完成到阶段 6）
 
-**在线预览（前端界面）**：<https://sochikurimareki68-gif.github.io/fastapi-docs-qa/>
+**在线 Demo（可用问答）**：<https://fastapi-docs-qa.onrender.com/>
 
-> 说明：GitHub Pages 仅托管静态文件、没有后端，因此该预览页只展示界面；问答会明确提示「服务不可用」（不返回模拟答案）。可用的问答 demo 需等阶段 6 将 `server.py` 部署到 Render 等平台。
+> 说明：`server.py` 同时托管前端与 `/api/*`，因此该地址打开即是完整 Demo（前端与后端同源）。服务托管在 Render 免费版，**15 分钟无访问会休眠**，首次打开需等待约 1 分钟唤醒（页面会显示「检测中」）。
+
+**纯前端预览（无后端）**：<https://sochikurimareki68-gif.github.io/fastapi-docs-qa/> —— GitHub Pages 只托管静态文件，该页仅展示界面；问答会明确提示「服务不可用」（不返回模拟答案）。
 
 ## 技术架构
 
@@ -14,7 +16,7 @@
 用户浏览器
    │  fetch /api/chat（HttpOnly Cookie 会话）
    ▼
-server.py（Python 标准库后端代理，Render 部署）   ← 阶段 4，联调通过
+server.py（Python 标准库后端代理，Render 部署）   ← 阶段 4/6，线上联调通过
    │  转发请求，保管 API Key
    ▼
 Dify 对话型应用（关联知识库）
@@ -67,6 +69,6 @@ python3 upload_docs.py --dataset-id <dataset_id> --reindex   # 索引失败后�
 - [x] 阶段 3：Dify 对话型应用配置 —— 系统 Prompt + DeepSeek V4.1 Flash（温度 0.2、关闭思考模式）+ 开场白 + 引用与归属
 - [x] 阶段 4：后端代理（复用[电商客服项目](https://github.com/sochikurimareki68-gif/ecommerce-ai-customer-service)框架，对接 Dify API；本地联调通过）
 - [x] 阶段 5：前端 —— 全新「RAG 检索工作台」三栏界面（Markdown/代码块渲染 + 引用来源面板 + 相关度得分可视化），本地实测通过
-- [ ] 阶段 6：部署上线（Render）
+- [x] 阶段 6：部署上线（Render）—— 通过 `render.yaml` 蓝图部署为免费 Web 服务，线上 `/api/health` 与问答链路（流式回答 + 引用来源）实测通过：<https://fastapi-docs-qa.onrender.com/>
 - [ ] 阶段 7：效果评测（准确率 / 引用命中率 / 延迟）
 - [ ] 阶段 8：文档收尾
