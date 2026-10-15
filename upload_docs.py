@@ -50,6 +50,23 @@ CA_CANDIDATES = (
     "/usr/local/etc/openssl@3/cert.pem",
     "/opt/homebrew/etc/openssl@3/cert.pem",
 )
+# 分段规则：按 Markdown 的二级标题（"\n## "）切，并关闭 remove_extra_spaces。
+# 为什么不用 Dify 默认的自动分段：自动分段会强制开启 remove_extra_spaces，
+# 它把连续空格压成一个，导致检索出来的 Python 代码缩进全部损坏（`    return` 变 ` return`）。
+# 另外，自定义分段只按分隔符切、不会把相邻的短片段合并，所以分隔符必须落在语义边界上：
+# 实测用单个换行 "\n" 会把每一行都切成一段（同一篇文档 34 段 → 350 段）。
+# max_tokens=500 与原先自动分段的片段粒度相当（平均片段长度 349 ≈ 原 391），
+# 这样既修好代码缩进，又尽量不改变已验证过的检索粒度。
+PROCESS_RULE = {
+    "mode": "custom",
+    "rules": {
+        "pre_processing_rules": [
+            {"id": "remove_extra_spaces", "enabled": False},
+            {"id": "remove_urls_emails", "enabled": False},
+        ],
+        "segmentation": {"separator": "\n## ", "max_tokens": 500, "chunk_overlap": 50},
+    },
+}
 
 
 def build_ssl_context() -> ssl.SSLContext:
@@ -176,7 +193,7 @@ def upload_one(dataset_id: str, name: str, text: str) -> None:
                     "name": name,
                     "text": text,
                     "indexing_technique": "high_quality",
-                    "process_rule": {"mode": "automatic"},
+                    "process_rule": PROCESS_RULE,
                 },
             )
             return
@@ -198,7 +215,7 @@ def reindex_one(dataset_id: str, document_id: str, name: str, text: str) -> None
                 {
                     "name": name,
                     "text": text,
-                    "process_rule": {"mode": "automatic"},
+                    "process_rule": PROCESS_RULE,
                 },
             )
             return
