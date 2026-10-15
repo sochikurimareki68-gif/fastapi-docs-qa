@@ -2,7 +2,7 @@
 """把 docs-source/ 下的 FastAPI 文档语料批量导入 Dify 知识库。
 
 为什么需要这个脚本：
-    Dify 免费版界面每批只允许上传 1 个文件，48 篇语料手工拖入不现实。
+    Dify 免费版界面每批只允许上传 1 个文件，50 篇语料手工拖入不现实。
     改用 Dify 的 Dataset API（document/create-by-text）批量推送。
 
 用法：

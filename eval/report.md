@@ -1,6 +1,6 @@
 # 项目二 · 效果评测报告（RAG 知识库问答）
 
-> 生成时间：2026-10-16 00:07　|　生成模型：DeepSeek V4.1 Flash（Dify 平台）+ bge-m3 混合检索（召回池 Top-K 20 / 返回 Top-K 10）+ Rerank（bge-reranker-v2-m3）　|　接口：`http://localhost:3101`
+> 生成时间：2026-10-16 00:27　|　生成模型：DeepSeek V4.1 Flash（Dify 平台）+ bge-m3 混合检索（召回池 Top-K 20 / 返回 Top-K 10）+ Rerank（bge-reranker-v2-m3）　|　接口：`http://localhost:3101`
 > 知识库：FastAPI 官方中文文档 48 篇 · 知识库检索问答
 > 用例总数：28（库内 24 / 越界 4）　|　成功返回：28　|　失败：0
 
@@ -13,14 +13,14 @@
 | └ 严格口径（附加参考） | 95.8%（23/24） | 在文档级命中基础上，再要求 top-1 得分 ≥ 0.5 |
 | **越界拒答率** | **100.0%**（4/4） | 库外问题：明确拒答而非编造 |
 | 引用相关度（top-1 均值） | 0.84 | 库内问题检索得分，区间 0.09–1.0 |
-| 平均响应延迟 | 7.8s | P95 = 9.8s，最长 10.9s |
+| 平均响应延迟 | 7.8s | P95 = 9.4s，最长 9.6s |
 
 ## 二、逐条结果
 
 | ID | 模块 | 类型 | 结果 | 引用相关度 | 命中文档 | 说明 |
 |----|------|------|------|-----------|---------|------|
 | c01 | 路由基础 | 库内 | ✅ 通过 | 0.85 | first-steps.md、debugging.md、bigger-appli | — |
-| c02 | 路径参数 | 库内 | ✅ 通过 | 0.91 | path-params.md、body.md、path-params-numer | — |
+| c02 | 路径参数 | 库内 | ✅ 通过 | 0.92 | path-params.md、body.md、path-params-numer | — |
 | c03 | 路径参数校验 | 库内 | ✅ 通过 | 0.87 | path-params-numeric-validations.md、query | — |
 | c04 | 查询参数校验 | 库内 | ✅ 通过 | 0.79 | query-params-str-validations.md、query-pa | — |
 | c05 | 请求体 | 库内 | ✅ 通过 | 0.97 | body.md、body-nested-models.md、body-multi | — |
@@ -31,7 +31,7 @@
 | c10 | 文件上传 | 库内 | ✅ 通过 | 0.66 | request-files.md | — |
 | c11 | 文件与表单 | 库内 | ✅ 通过 | 0.96 | request-forms-and-files.md、request-files | — |
 | c12 | 请求头 | 库内 | ✅ 通过 | 0.94 | header-params.md、security-first-steps.md | — |
-| c13 | Cookie | 库内 | ✅ 通过 | 0.81 | cookie-param-models.md、query-param-model | — |
+| c13 | Cookie | 库内 | ✅ 通过 | 0.80 | cookie-param-models.md、query-param-model | — |
 | c14 | 依赖注入 | 库内 | ✅ 通过 | 0.99 | background-tasks.md、dependencies-sub-dep | — |
 | c15 | 依赖清理 | 库内 | ✅ 通过 | 0.93 | dependencies-dependencies-with-yield.md | — |
 | c16 | 安全认证 | 库内 | ✅ 通过 | 0.93 | security-first-steps.md、security-simple- | — |
@@ -44,7 +44,7 @@
 | c23 | 大型项目结构 | 库内 | ✅ 通过 | 0.09 | dependencies-global-dependencies.md、depe | 引用命中（文档级），相关度偏低 top1=0.09 |
 | c24 | 数据库 | 库内 | ✅ 通过 | 0.87 | server-sent-events.md、body.md、query-para | — |
 | o01 | 越界-闲聊 | 越界 | ✅ 正确拒答 | 0.0000 | handling-errors.md、debugging.md、extra-da | — |
-| o02 | 越界-闲聊 | 越界 | ✅ 正确拒答 | 0.0010 | handling-errors.md、testing.md、extra-data | — |
+| o02 | 越界-闲聊 | 越界 | ✅ 正确拒答 | 0.0010 | handling-errors.md、testing.md、advanced-s | — |
 | o03 | 越界-相近技术 | 越界 | ✅ 正确拒答 | 0.3030 | sql-databases.md、body.md、extra-models.md | — |
 | o04 | 越界-闲聊 | 越界 | ✅ 正确拒答 | 0.0050 | query-params-str-validations.md、server-s | — |
 
@@ -54,7 +54,7 @@
 - 引用命中率（文档级召回）：100.0%（目标 ≥ 85%）✅ 达标
 - 越界拒答率：100.0%（目标 ≥ 100%）✅ 达标
 - 参考：严格口径命中率 95.8%（23/24，在文档级命中基础上再要求 top-1 ≥ 0.5）
-- 延迟：平均 7.8s、P95 9.8s（含 Render 冷启动与 Dify 端到端耗时）
+- 延迟：平均 7.8s、P95 9.4s（含 Render 冷启动与 Dify 端到端耗时）
 
 ## 四、评测方法与局限
 
