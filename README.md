@@ -126,4 +126,4 @@ python3 eval/run_eval.py --base http://localhost:3000 --delay 0   # 本地全速
 - [x] 阶段 5：前端 —— 全新「RAG 检索工作台」三栏界面（Markdown/代码块渲染 + 引用来源面板 + 相关度得分可视化），本地实测通过
 - [x] 阶段 6：部署上线（Render）—— 通过 `render.yaml` 蓝图部署为免费 Web 服务，线上 `/api/health` 与问答链路（流式回答 + 引用来源）实测通过：<https://fastapi-docs-qa.onrender.com/>
 - [x] 阶段 7：效果评测 —— 28 条用例（库内 24 / 越界 4）：答案准确率 95.8%、越界拒答率 100%、引用命中率 70.8%、top-1 相关度 0.75、平均延迟 7.6s，报告见 [eval/report.md](eval/report.md)
-- [x] 阶段 8：文档收尾 —— README（架构 / 快速开始 / 部署 / 评测 / 路线图）+ 设计文档 [docs/rag-design.md](docs/rag-design.md) + 简历项目描述
+- [x] 阶段 8：文档收尾 —— README（架构 / 快速开始 / 部署 / 评测 / 路线图）+ 设计文档 [docs/rag-design.md](docs/rag-design.md)
