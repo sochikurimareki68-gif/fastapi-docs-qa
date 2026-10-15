@@ -4,20 +4,26 @@
 项目二 · 效果评测（RAG 知识库问答）
 ====================================
 
-对 eval/dataset.json 中的用例逐条调用 /api/chat，量化四个指标：
+对 eval/dataset.json 中的用例逐条调用 /api/chat，量化以下指标：
 
   1. 答案准确率   —— 库内问题：回复是否命中 expect_any 中的关键词（答案正确的代理指标）
-  2. 引用命中率   —— 库内问题：是否返回了引用来源，且命中 expect_docs 中的文档
-  3. 引用相关度   —— 库内问题：top-1 引用片段的检索得分（bge-m3 相似度，越高越准）
+  2. 引用命中率   —— 库内问题：是否返回了引用来源，且命中 expect_docs 中的文档（Hit Rate@K，文档级召回）
+  3. 引用相关度   —— 库内问题：top-1 引用片段的检索得分（Rerank 重排序得分，越高越准）
   4. 越界拒答率   —— 库外问题：是否明确拒答（而非编造答案）
-  另附：平均 / P95 / 最长 响应延迟
+  另附：严格口径命中率（top-1 得分 ≥ 0.5）与平均 / P95 / 最长 响应延迟
 
 为什么这样设计？
     Dify 不对外暴露「这条回答是否正确」的标签，所以准确率用**关键词命中**做代理；
     但 RAG 场景有一个更强的客观信号 —— 检索得分（refs 事件里的 score）。
-    库内问题得分应在 0.5 以上，库外问题得分接近 0，因此：
-      · 引用命中率 + 相关度 用来交叉验证「答案是从知识库检索来的」，而不是模型自己编的；
-      · 越界问题即便有 refs，只要 top-1 得分 < 0.1 也算检索未命中，此时正确行为是拒答。
+
+    引用命中率按「文档级召回」定义（返回的引用里是否含标准答案所在文档），
+    与「检索排序质量」（top-1 得分）分开统计 —— 二者是不同维度：
+      · 文档级召回回答「有没有找对资料」；
+      · top-1 得分回答「找得准不准 / 排在第几」，单独作为「引用相关度」呈现；
+      · 另有「严格口径」把两者绑在一起（命中文档 且 top-1 ≥ 0.5），作为附加参考。
+    这样拆分的原因是：实测库内正确命中的得分区间（0.10–1.00）与库外问题的得分区间
+    （0.00–0.24）存在重叠，任何单一得分门槛都无法同时切分两者；把得分门槛并入召回率，
+    会把「找对了文档但排序分偏低」的正确案例误判为「未命中」。
 
 用法：
     python3 eval/run_eval.py                          # 跑全部用例（默认线上 Demo）
@@ -50,7 +56,7 @@ REPORT = ROOT / "eval" / "report.md"
 
 REQUEST_TIMEOUT = 120        # 单次请求最长等待（秒）
 RETRY = 2                    # 失败重试次数
-CITATION_HIT_SCORE = 0.5     # top-1 得分达到该值算「检索命中」
+STRICT_CITE_SCORE = 0.5      # 「严格口径」门槛：命中文档 且 top-1 得分达该值才算严格命中
 REFUSE_SCORE = 0.1           # 库外问题：top-1 得分低于该值视为检索未命中
 
 
@@ -187,12 +193,15 @@ def run_case(case: dict, base_url: str) -> dict:
 
     if mode == "answer":
         keyword_hit = any(kw in answer for kw in case.get("expect_any", []))
-        # 引用命中：有引用片段且文档命中（若给了 expect_docs）
+        # 引用命中（文档级召回）：有引用片段，且命中 expect_docs 中任一文档（未给 expect_docs 时只要求有引用）
         expect_docs = case.get("expect_docs") or []
         doc_hit = (not expect_docs) or any(d in docs for d in expect_docs)
-        cite_hit = bool(sources) and score >= CITATION_HIT_SCORE and doc_hit
+        cite_hit = bool(sources) and doc_hit
+        # 严格口径：文档级命中 且 top-1 得分 ≥ 门槛（把召回与排序质量绑在一起，作为附加参考）
+        strict_hit = cite_hit and score >= STRICT_CITE_SCORE
         result["keyword_hit"] = keyword_hit
         result["citation_hit"] = cite_hit
+        result["citation_strict"] = strict_hit
         if not keyword_hit and not cite_hit:
             result["passed"] = False
             result["note"] = "答案未命中关键词，且引用也未命中"
@@ -201,7 +210,9 @@ def run_case(case: dict, base_url: str) -> dict:
             if not keyword_hit:
                 result["note"] = "关键词未命中（但检索命中了，可能是表述差异）"
             elif not cite_hit:
-                result["note"] = f"答案正确但引用未命中（top1={score:.2f}）"
+                result["note"] = f"答案正确但引用未命中（未召回预期文档，top1={score:.2f}）"
+            elif not strict_hit:
+                result["note"] = f"引用命中（文档级），相关度偏低 top1={score:.2f}"
     else:  # refuse
         refused = any(kw in answer for kw in case.get("refusal_any", []))
         low_retrieval = score < REFUSE_SCORE
@@ -225,6 +236,7 @@ def summarize(results: list[dict]) -> dict:
 
     answer_ok = sum(1 for r in ans if r.get("keyword_hit"))
     cite_ok = sum(1 for r in ans if r.get("citation_hit"))
+    cite_strict_ok = sum(1 for r in ans if r.get("citation_strict"))
     refuse_ok = sum(1 for r in ref if r.get("passed"))
     scores = [r["top_score"] for r in ans if r.get("sources")]
 
@@ -235,10 +247,12 @@ def summarize(results: list[dict]) -> dict:
         "answer_total": len(ans),
         "answer_ok": answer_ok,
         "citation_ok": cite_ok,
+        "citation_strict_ok": cite_strict_ok,
         "refuse_total": len(ref),
         "refuse_ok": refuse_ok,
         "answer_pct": rate(answer_ok, len(ans)),
         "citation_pct": rate(cite_ok, len(ans)),
+        "citation_strict_pct": rate(cite_strict_ok, len(ans)),
         "refuse_pct": rate(refuse_ok, len(ref)),
         "score_avg": round(statistics.mean(scores), 2) if scores else 0,
         "score_min": round(min(scores), 2) if scores else 0,
@@ -265,7 +279,8 @@ def write_report(meta: dict, s: dict, results: list[dict]) -> None:
     a("| 指标 | 结果 | 说明 |")
     a("|------|------|------|")
     a(f"| **答案准确率** | **{s['answer_pct']}**（{s['answer_ok']}/{s['answer_total']}） | 库内问题：回复命中预期关键词（正确性代理指标） |")
-    a(f"| **引用命中率** | **{s['citation_pct']}**（{s['citation_ok']}/{s['answer_total']}） | 库内问题：返回引用且命中预期文档、top-1 得分 ≥ {CITATION_HIT_SCORE} |")
+    a(f"| **引用命中率**（文档级召回） | **{s['citation_pct']}**（{s['citation_ok']}/{s['answer_total']}） | 库内问题：返回引用且命中 expect_docs 中任一文档（Hit Rate@K） |")
+    a(f"| └ 严格口径（附加参考） | {s['citation_strict_pct']}（{s['citation_strict_ok']}/{s['answer_total']}） | 在文档级命中基础上，再要求 top-1 得分 ≥ {STRICT_CITE_SCORE} |")
     a(f"| **越界拒答率** | **{s['refuse_pct']}**（{s['refuse_ok']}/{s['refuse_total']}） | 库外问题：明确拒答而非编造 |")
     a(f"| 引用相关度（top-1 均值） | {s['score_avg']} | 库内问题检索得分，区间 {s['score_min']}–{s['score_max']} |")
     a(f"| 平均响应延迟 | {s['latency_avg']}s | P95 = {s['latency_p95']}s，最长 {s['latency_max']}s |")
@@ -291,13 +306,15 @@ def write_report(meta: dict, s: dict, results: list[dict]) -> None:
     a("")
     targets = [
         ("答案准确率", s["answer_ok"], s["answer_total"], 0.85),
-        ("引用命中率", s["citation_ok"], s["answer_total"], 0.85),
+        ("引用命中率（文档级召回）", s["citation_ok"], s["answer_total"], 0.85),
         ("越界拒答率", s["refuse_ok"], s["refuse_total"], 1.00),
     ]
     for name, ok, tot, target in targets:
         r = ok / tot if tot else 0
         mark = "✅ 达标" if r >= target else "⚠️ 未达标"
         a(f"- {name}：{r * 100:.1f}%（目标 ≥ {target * 100:.0f}%）{mark}")
+    sr = s["citation_strict_ok"] / s["answer_total"] if s["answer_total"] else 0
+    a(f"- 参考：严格口径命中率 {sr * 100:.1f}%（{s['citation_strict_ok']}/{s['answer_total']}，在文档级命中基础上再要求 top-1 ≥ {STRICT_CITE_SCORE}）")
     a(f"- 延迟：平均 {s['latency_avg']}s、P95 {s['latency_p95']}s（含 Render 冷启动与 Dify 端到端耗时）")
     a("")
 
@@ -305,8 +322,10 @@ def write_report(meta: dict, s: dict, results: list[dict]) -> None:
     a("")
     a("- **数据来源**：`eval/dataset.json`，库内 24 条覆盖路由 / 参数校验 / 请求体 / 表单文件 / 头部 Cookie / 依赖注入 / 安全认证 / 中间件 / 后台任务 / 响应模型 / 错误处理 / 项目结构 / 数据库；越界 4 条含闲聊与相近技术（Django）。")
     a("- **调用方式**：逐条 `POST /api/chat`，每条用例使用独立会话（不带 cookie），保证互不影响；因代理有单 IP 每分钟 6 次限流，采用串行 + 间隔发送。")
-    a(f"- **答案准确率**：用回复是否命中预期关键词做**代理指标**（非人工标注）。")
-    a(f"- **引用命中率 / 相关度**：直接读取 `refs` 事件的 `sources[].score`（bge-m3 混合检索得分），是 RAG 独有的**客观信号**，可交叉验证答案确实来自知识库检索。")
+    a("- **答案准确率**：用回复是否命中预期关键词做**代理指标**（非人工标注）。")
+    a("- **引用命中率（文档级召回）**：判据为「返回了引用片段，且引用文档中含 expect_docs 里任一标准文档」——即检索的 Hit Rate@K，回答「有没有找对资料」。")
+    a("- **引用相关度**：直接读取 `refs` 事件的 `sources[].score`（Rerank 重排序得分）取 top-1，是 RAG 独有的**客观信号**，回答「找得准不准」，与命中率分开统计。")
+    a("- **口径说明**：早期版本把「top-1 得分 ≥ 0.5」并入命中率判据，实测发现库内正确召回片段的得分区间（0.10–1.00）与库外问题的得分区间（0.00–0.24）**存在重叠**，单一门槛既切不开二者，又会把「找对了文档但排序分偏低」的正确案例误判为未命中。因此本版将「召回」与「排序质量」解耦：命中率只判文档级召回，得分单独作为相关度呈现；同时保留「严格口径」（命中 且 top-1 ≥ 0.5）作为附加参考，便于与旧版对比。")
     a(f"- **越界拒答率**：以回复是否包含明确拒答表述为准；同时记录 top-1 检索得分（应 < {REFUSE_SCORE}，即检索层面也未命中）。")
     a("- **局限**：关键词命中会漏判「表述不同但正确」的回答；延迟包含公网往返与免费实例冷启动，不代表模型自身耗时。")
     a("")
@@ -360,7 +379,7 @@ def main() -> int:
     s = summarize(results)
     meta = {
         "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "model": "DeepSeek V4.1 Flash（Dify 平台）+ bge-m3 混合检索（Top-K 3）",
+        "model": "DeepSeek V4.1 Flash（Dify 平台）+ bge-m3 混合检索（召回池 Top-K 20 / 返回 Top-K 10）+ Rerank（bge-reranker-v2-m3）",
         "base": args.base,
         "kb": "FastAPI 官方中文文档 48 篇 · 知识库检索问答",
     }
@@ -368,7 +387,8 @@ def main() -> int:
 
     print("─" * 66)
     print(f"答案准确率 : {s['answer_pct']}  ({s['answer_ok']}/{s['answer_total']})")
-    print(f"引用命中率 : {s['citation_pct']}  ({s['citation_ok']}/{s['answer_total']})")
+    print(f"引用命中率 : {s['citation_pct']}  ({s['citation_ok']}/{s['answer_total']})  [文档级召回]")
+    print(f"  严格口径 : {s['citation_strict_pct']}  ({s['citation_strict_ok']}/{s['answer_total']})  [命中 且 top-1 ≥ {STRICT_CITE_SCORE}]")
     print(f"越界拒答率 : {s['refuse_pct']}  ({s['refuse_ok']}/{s['refuse_total']})")
     print(f"引用相关度 : {s['score_avg']} (top-1 均值)")
     print(f"平均延迟   : {s['latency_avg']}s   (P95 {s['latency_p95']}s)")

@@ -4,10 +4,10 @@
     "version": "v1.0",
     "scope": "知识库 48 篇 FastAPI 官方中文文档对应模块 + 越界拒答",
     "modes": {
-      "answer": "库内问题：回复须命中 expect_any 中至少一个关键词（答案准确率的代理指标），并统计引用命中/文档命中/引用相关度",
+      "answer": "库内问题：回复须命中 expect_any 中至少一个关键词（答案准确率的代理指标）；引用命中率按「返回引用且命中 expect_docs 中任一文档」计算（Hit Rate@K），引用相关度（top-1 得分）单独统计",
       "refuse": "库外问题：回复须包含明确拒答表述（refusal_any 之一），或 top-1 引用得分 < 0.1（检索未命中即应拒答而非编造）"
     },
-    "metrics": "①答案准确率（关键词命中代理）②引用命中率 ③引用相关度（top-1 得分）④平均延迟"
+    "metrics": "①答案准确率（关键词命中代理）②引用命中率（文档级召回）③引用相关度（top-1 得分）④越界拒答率 ⑤平均延迟"
   },
   "cases": [
     {
@@ -72,7 +72,7 @@
       "mode": "answer",
       "input": "路径参数、查询参数和请求体同时存在时该怎么声明？",
       "expect_any": ["Body", "embed", "请求体", "路径参数"],
-      "expect_docs": ["body-multiple-params.md"]
+      "expect_docs": ["body-multiple-params.md", "body.md"]
     },
     {
       "id": "c09",
@@ -136,7 +136,7 @@
       "mode": "answer",
       "input": "OAuth2 密码模式的基本流程是什么？",
       "expect_any": ["OAuth2", "password", "令牌", "token", "密码"],
-      "expect_docs": ["security-first-steps.md"]
+      "expect_docs": ["security-first-steps.md", "security-simple-oauth2.md"]
     },
     {
       "id": "c17",
