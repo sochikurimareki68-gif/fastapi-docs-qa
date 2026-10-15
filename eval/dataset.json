@@ -1,0 +1,234 @@
+{
+  "meta": {
+    "name": "FastAPI 文档智能问答助手 · 效果评测用例集",
+    "version": "v1.0",
+    "scope": "知识库 48 篇 FastAPI 官方中文文档对应模块 + 越界拒答",
+    "modes": {
+      "answer": "库内问题：回复须命中 expect_any 中至少一个关键词（答案准确率的代理指标），并统计引用命中/文档命中/引用相关度",
+      "refuse": "库外问题：回复须包含明确拒答表述（refusal_any 之一），或 top-1 引用得分 < 0.1（检索未命中即应拒答而非编造）"
+    },
+    "metrics": "①答案准确率（关键词命中代理）②引用命中率 ③引用相关度（top-1 得分）④平均延迟"
+  },
+  "cases": [
+    {
+      "id": "c01",
+      "module": "路由基础",
+      "mode": "answer",
+      "input": "如何定义一个最简单的 FastAPI 接口并运行起来？",
+      "expect_any": ["@app.get", "FastAPI()", "uvicorn", "main:app"],
+      "expect_docs": ["first-steps.md"]
+    },
+    {
+      "id": "c02",
+      "module": "路径参数",
+      "mode": "answer",
+      "input": "路径参数是什么，怎么声明一个带路径参数的接口？",
+      "expect_any": ["路径参数", "item_id", "声明", "{item_id}"],
+      "expect_docs": ["path-params.md"]
+    },
+    {
+      "id": "c03",
+      "module": "路径参数校验",
+      "mode": "answer",
+      "input": "如何校验路径参数的数值范围，比如必须大于 0？",
+      "expect_any": ["Path", "ge=", "gt=", "le=", "422"],
+      "expect_docs": ["path-params-numeric-validations.md"]
+    },
+    {
+      "id": "c04",
+      "module": "查询参数校验",
+      "mode": "answer",
+      "input": "查询参数怎么限制长度和做正则校验？",
+      "expect_any": ["min_length", "max_length", "Query", "regex", "pattern"],
+      "expect_docs": ["query-params-str-validations.md"]
+    },
+    {
+      "id": "c05",
+      "module": "请求体",
+      "mode": "answer",
+      "input": "怎么声明一个请求体模型来接收 JSON 数据？",
+      "expect_any": ["BaseModel", "Pydantic", "Body", "请求体"],
+      "expect_docs": ["body.md"]
+    },
+    {
+      "id": "c06",
+      "module": "请求体字段",
+      "mode": "answer",
+      "input": "请求体的字段如何添加默认值和校验？",
+      "expect_any": ["Field", "BaseModel", "默认值", "校验"],
+      "expect_docs": ["body-fields.md"]
+    },
+    {
+      "id": "c07",
+      "module": "嵌套模型",
+      "mode": "answer",
+      "input": "请求体里嵌套模型和列表字段该怎么定义？",
+      "expect_any": ["List", "嵌套", "BaseModel", "list"],
+      "expect_docs": ["body-nested-models.md"]
+    },
+    {
+      "id": "c08",
+      "module": "多来源参数",
+      "mode": "answer",
+      "input": "路径参数、查询参数和请求体同时存在时该怎么声明？",
+      "expect_any": ["Body", "embed", "请求体", "路径参数"],
+      "expect_docs": ["body-multiple-params.md"]
+    },
+    {
+      "id": "c09",
+      "module": "表单",
+      "mode": "answer",
+      "input": "表单数据应该怎么接收？",
+      "expect_any": ["Form", "表单", "multipart"],
+      "expect_docs": ["request-forms.md"]
+    },
+    {
+      "id": "c10",
+      "module": "文件上传",
+      "mode": "answer",
+      "input": "怎么处理上传的文件？",
+      "expect_any": ["UploadFile", "File", "multipart"],
+      "expect_docs": ["request-files.md"]
+    },
+    {
+      "id": "c11",
+      "module": "文件与表单",
+      "mode": "answer",
+      "input": "同一个接口怎么同时接收文件和表单字段？",
+      "expect_any": ["UploadFile", "Form", "文件", "表单"],
+      "expect_docs": ["request-forms-and-files.md"]
+    },
+    {
+      "id": "c12",
+      "module": "请求头",
+      "mode": "answer",
+      "input": "如何读取 User-Agent 这类请求头参数？",
+      "expect_any": ["Header", "User-Agent", "请求头", "user_agent"],
+      "expect_docs": ["header-params.md"]
+    },
+    {
+      "id": "c13",
+      "module": "Cookie",
+      "mode": "answer",
+      "input": "怎么从 Cookie 里读取参数？",
+      "expect_any": ["Cookie", "cookie", "ads_id"],
+      "expect_docs": ["cookie-params.md"]
+    },
+    {
+      "id": "c14",
+      "module": "依赖注入",
+      "mode": "answer",
+      "input": "FastAPI 的依赖注入是什么，怎么用 Depends？",
+      "expect_any": ["Depends", "依赖注入", "依赖"],
+      "expect_docs": null
+    },
+    {
+      "id": "c15",
+      "module": "依赖清理",
+      "mode": "answer",
+      "input": "在依赖里怎么用 yield 在请求结束后做清理？",
+      "expect_any": ["yield", "finally", "清理", "Depends"],
+      "expect_docs": ["dependencies-dependencies-with-yield.md"]
+    },
+    {
+      "id": "c16",
+      "module": "安全认证",
+      "mode": "answer",
+      "input": "OAuth2 密码模式的基本流程是什么？",
+      "expect_any": ["OAuth2", "password", "令牌", "token", "密码"],
+      "expect_docs": ["security-first-steps.md"]
+    },
+    {
+      "id": "c17",
+      "module": "JWT",
+      "mode": "answer",
+      "input": "如何签发和校验 JWT 令牌？",
+      "expect_any": ["JWT", "token", "decode", "encode", "令牌", "SECRET"],
+      "expect_docs": ["security-oauth2-jwt.md"]
+    },
+    {
+      "id": "c18",
+      "module": "跨域",
+      "mode": "answer",
+      "input": "如何启用 CORS 跨域？",
+      "expect_any": ["CORSMiddleware", "allow_origins", "add_middleware"],
+      "expect_docs": ["cors.md"]
+    },
+    {
+      "id": "c19",
+      "module": "中间件",
+      "mode": "answer",
+      "input": "怎么添加一个自定义中间件，多个中间件的执行顺序是怎样的？",
+      "expect_any": ["@app.middleware", "中间件", "add_middleware", "顺序"],
+      "expect_docs": ["middleware.md"]
+    },
+    {
+      "id": "c20",
+      "module": "后台任务",
+      "mode": "answer",
+      "input": "响应返回之后要执行的任务（例如发邮件）怎么写？",
+      "expect_any": ["BackgroundTasks", "add_task", "后台任务"],
+      "expect_docs": ["background-tasks.md"]
+    },
+    {
+      "id": "c21",
+      "module": "响应模型",
+      "mode": "answer",
+      "input": "response_model 有什么作用？",
+      "expect_any": ["response_model", "响应模型", "过滤", "Pydantic"],
+      "expect_docs": ["response-model.md"]
+    },
+    {
+      "id": "c22",
+      "module": "错误处理",
+      "mode": "answer",
+      "input": "接口里抛出错误时怎么返回合适的 HTTP 状态码？",
+      "expect_any": ["HTTPException", "状态码", "异常", "404"],
+      "expect_docs": ["handling-errors.md"]
+    },
+    {
+      "id": "c23",
+      "module": "大型项目结构",
+      "mode": "answer",
+      "input": "项目变大之后怎么用多个文件来组织路由？",
+      "expect_any": ["APIRouter", "prefix", "include_router", "路由"],
+      "expect_docs": ["bigger-applications.md"]
+    },
+    {
+      "id": "c24",
+      "module": "数据库",
+      "mode": "answer",
+      "input": "怎么在 FastAPI 里连接数据库并查询数据？",
+      "expect_any": ["SQLAlchemy", "Session", "数据库", "engine"],
+      "expect_docs": ["sql-databases.md"]
+    },
+    {
+      "id": "o01",
+      "module": "越界-闲聊",
+      "mode": "refuse",
+      "input": "今天上海天气怎么样？",
+      "refusal_any": ["我只", "不在", "抱歉", "无法", "超出", "范围", "知识库", "拒答", "答不了"]
+    },
+    {
+      "id": "o02",
+      "module": "越界-闲聊",
+      "mode": "refuse",
+      "input": "帮我写一首关于秋天的散文诗。",
+      "refusal_any": ["我只", "不在", "抱歉", "无法", "超出", "范围", "知识库", "拒答", "答不了"]
+    },
+    {
+      "id": "o03",
+      "module": "越界-相近技术",
+      "mode": "refuse",
+      "input": "如何在 Django 中定义数据模型并做数据库迁移？",
+      "refusal_any": ["我只", "不在", "抱歉", "无法", "超出", "范围", "知识库", "拒答", "答不了"]
+    },
+    {
+      "id": "o04",
+      "module": "越界-闲聊",
+      "mode": "refuse",
+      "input": "推荐几部最近的热门电影给我。",
+      "refusal_any": ["我只", "不在", "抱歉", "无法", "超出", "范围", "知识库", "拒答", "答不了"]
+    }
+  ]
+}
