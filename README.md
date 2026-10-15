@@ -2,7 +2,7 @@
 
 基于 [Dify](https://dify.ai) 知识库的 RAG 问答系统：用户用自然语言提问 → 向量检索 FastAPI 官方中文文档 → 大模型生成答案 → 展示引用来源。
 
-> 当前状态：已部署上线并通过效果评测（28 条用例：答案准确率 95.8%、越界拒答率 100%、引用命中率 70.8%），8 阶段计划完成到阶段 7
+> 当前状态：已部署上线并通过效果评测（28 条用例：答案准确率 95.8%、越界拒答率 100%、引用命中率 70.8%），8 阶段计划全部完成
 
 **在线 Demo（可用问答）**：<https://fastapi-docs-qa.onrender.com/>
 
@@ -25,8 +25,8 @@ Dify 对话型应用（关联知识库）
 SSE 流式回答 + metadata.retriever_resources（引用片段）
 ```
 
-- **知识库**：FastAPI 官方中文教程 48 篇（约 333 KB，含 176 个还原的 Python 代码块）
-- **Embedding**：硅基流动 `BAAI/bge-m3`（语义检索，Top-K = 3）
+- **知识库**：FastAPI 官方中文教程 48 篇（约 333 KB，含 176 个还原的 Python 代码块），高质量索引 · 自动分段
+- **Embedding**：硅基流动 `BAAI/bge-m3`；检索模式 **混合检索**（向量 + 全文），Top-K = 3
 - **检索测试**：路径参数校验 / CORS / 后台任务 / OAuth2 / 文件上传 5 类问题均 top-1 命中对应文档
 - **后端联调**：SSE 流式（meta/delta/refs/done）、会话连续（conversation_id 服务端映射）、多文档引用（OAuth2 一题命中 2 篇）、越界问题拒答、新对话重置，均实测通过
 
@@ -45,6 +45,7 @@ SSE 流式回答 + metadata.retriever_resources（引用片段）
 | `eval/dataset.json` | 效果评测用例集：28 条（库内 24 条覆盖路由 / 参数校验 / 请求体 / 表单文件 / 头部 Cookie / 依赖注入 / 安全认证 / 中间件 / 后台任务 / 响应模型 / 错误处理 / 项目结构 / 数据库，越界 4 条含闲聊与相近技术） |
 | `eval/run_eval.py` | 评测脚本（零依赖）：逐条调用线上 `/api/chat`，解析 SSE 的回复与引用来源，产出答案准确率 / 引用命中率 / 越界拒答率 / 相关度 / 延迟 |
 | `eval/report.md` | 评测报告（脚本生成）：总体指标、逐条结果、验收结论、方法与局限 |
+| `docs/rag-design.md` | 设计文档：语料清洗与索引配置、检索策略、Prompt 逐条意图、引用来源三层处理、访问防护与会话设计、评测发现与优化方向 |
 
 语料产物 `docs-source/` 由脚本生成，不入库；复现方式见脚本 docstring。
 
@@ -64,6 +65,34 @@ python3 upload_docs.py --list                       # 查看知识库 ID
 python3 upload_docs.py --dataset-id <dataset_id>    # 批量导入（自动跳过已存在）
 python3 upload_docs.py --dataset-id <dataset_id> --reindex   # 索引失败后重跑，无需删除重传
 ```
+
+## 部署（Render）
+
+项目已通过 [Render](https://render.com) 免费版部署上线，`render.yaml` 把部署方式写成代码（Blueprint），全流程无需手写构建命令。
+
+**一键部署（Blueprint）**
+
+1. 把本仓库推到 GitHub。
+2. Render 控制台 → **New → Blueprint** → 选中该仓库。
+3. Render 读取 `render.yaml` 自动创建 Web 服务；在环境变量处填入 `DIFY_API_KEY`（Dify → 应用 → 访问 API → API 密钥，`app-` 开头），`sync: false` 表示该值只填在控制台、不写进代码。
+4. 点 **Apply**，等待构建完成（首次约 1–2 分钟）。健康检查路径 `/api/health` 通过即部署成功。
+
+**关键配置（见 `render.yaml`）**
+
+| 项 | 值 | 说明 |
+|---|---|---|
+| runtime | `python` | 无第三方依赖，`requirements.txt` 是占位文件，只为让平台识别为 Python 项目 |
+| startCommand | `python server.py` | `server.py` 读取环境变量 `PORT` 与 `HOST` 并监听 |
+| healthCheckPath | `/api/health` | 存活探针 |
+| plan | `free` | 免费版 **15 分钟无访问会休眠**，下次访问需约 1 分钟唤醒 |
+| region | `singapore` | 离国内最近；若提示区域不可用，删除该行改用默认区域 |
+| envVars | `DIFY_API_KEY`（控制台填）/ `DIFY_BASE` | 密钥只在服务端持有，绝不发给前端 |
+
+**部署后**
+
+- 访问 `https://<服务名>.onrender.com/` 即为完整 Demo —— `server.py` 同时是静态文件服务器，把 `index.html` 与 `/api/*` 托管在同一域名下，**前后端同源，无需另配前端域名或 CORS**。
+- 需要自定义限流 / 请求体上限等参数时，按 `.env.example` 在控制台追加同名环境变量即可（所有变量都有默认值）。
+- 若部署到别的平台（Railway / Fly.io 等），`Procfile`（`web: python server.py`）同样可用。
 
 ## 效果评测（阶段 7）
 
@@ -97,4 +126,4 @@ python3 eval/run_eval.py --base http://localhost:3000 --delay 0   # 本地全速
 - [x] 阶段 5：前端 —— 全新「RAG 检索工作台」三栏界面（Markdown/代码块渲染 + 引用来源面板 + 相关度得分可视化），本地实测通过
 - [x] 阶段 6：部署上线（Render）—— 通过 `render.yaml` 蓝图部署为免费 Web 服务，线上 `/api/health` 与问答链路（流式回答 + 引用来源）实测通过：<https://fastapi-docs-qa.onrender.com/>
 - [x] 阶段 7：效果评测 —— 28 条用例（库内 24 / 越界 4）：答案准确率 95.8%、越界拒答率 100%、引用命中率 70.8%、top-1 相关度 0.75、平均延迟 7.6s，报告见 [eval/report.md](eval/report.md)
-- [ ] 阶段 8：文档收尾
+- [x] 阶段 8：文档收尾 —— README（架构 / 快速开始 / 部署 / 评测 / 路线图）+ 设计文档 [docs/rag-design.md](docs/rag-design.md) + 简历项目描述
