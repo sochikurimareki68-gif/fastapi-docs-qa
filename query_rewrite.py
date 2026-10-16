@@ -26,11 +26,16 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.request
 
 # 改写后的检索式最长长度：太长的「改写」通常是模型在自问自答，宁可丢弃
 MAX_QUERY_CHARS = 200
+
+# 深检探针：只验证「密钥能不能调通」，不关心模型答什么，所以给一句话 + 1 token
+PROBE_MESSAGE = "ping"
+PROBE_TIMEOUT = 10.0    # 探针是给运维当场看结果的，别像改写那样等 20 秒
 
 # 改写提示词。核心是四条规则，其中第 4 条专门保护越界提问：
 # 闲聊 / 别的框架 / 需要上下文才能理解的问题原样返回 —— 否则改写器会硬把
@@ -50,13 +55,18 @@ REWRITE_SYSTEM_PROMPT = """你是检索式改写器。把用户的口语化提�
 _HAS_WORDS_RE = re.compile(r"[0-9A-Za-z\u4e00-\u9fff]")
 
 
-def _call_upstream(message: str, api_key: str, ssl_context) -> str:
-    """调用 OpenAI 兼容的 chat/completions 接口做改写，返回模型原始输出。"""
+def _call_upstream(message: str, api_key: str, ssl_context, max_tokens: int = 200,
+                   timeout: float | None = None) -> str:
+    """调用 OpenAI 兼容的 chat/completions 接口做改写，返回模型原始输出。
+
+    max_tokens / timeout 只在深检探针里被调小（见 probe）—— 改写本身一律用默认值。
+    """
     base = os.environ.get("REWRITE_BASE", "https://ark.cn-beijing.volces.com/api/v3").rstrip("/")
     model = os.environ.get("REWRITE_MODEL", "glm-5-3-flash-260828").strip()
     # 免费实例 CPU 被限流时，一次改写可能比本地慢好几倍（本地实测 2~6 秒），
     # 所以默认给到 20 秒；宁可偶尔多等，也不要动不动就放弃改写（见 REWRITE_TIMEOUT）
-    timeout = float(os.environ.get("REWRITE_TIMEOUT", "20"))
+    if timeout is None:
+        timeout = float(os.environ.get("REWRITE_TIMEOUT", "20"))
 
     payload = {
         "model": model,
@@ -65,7 +75,7 @@ def _call_upstream(message: str, api_key: str, ssl_context) -> str:
             {"role": "user", "content": message},
         ],
         "temperature": 0,        # 改写要稳定，不要发挥
-        "max_tokens": 200,
+        "max_tokens": max_tokens,
     }
     req = urllib.request.Request(
         f"{base}/chat/completions",
@@ -135,3 +145,49 @@ def rewrite_query(message: str, ssl_context=None) -> tuple[str, str]:
         print(f"  ⚠️ 查询改写输出不可用，改用原问题：{cleaned[:60]!r}", flush=True)
         return message, "fallback"
     return cleaned, "rewritten"
+
+
+def probe(ssl_context=None) -> dict:
+    """深检：真发一次极短的上游请求，判断改写密钥是否「有效可用」。
+
+    为什么需要它：`is_configured()` 只保证变量非空 —— 线上那把 REWRITE_API_KEY
+    曾填成另一把外形一模一样的火山密钥（同为 ark- 开头、46 位），健康检查一路
+    报 key_ready: true，实际每次改写都 401 并静默回退。只有真发一次请求、看上游
+    是否 200，才能把「已配置」和「可用」区分开（见 docs/rag-design.md 第八章）。
+
+    代价是探针自己会消耗一点额度，所以默认不跑 —— 只由 /api/health?deep=1 触发。
+    任何异常都在这里收敛成字典（不抛出），方便健康检查直接序列化：
+        status      ok / off / no-key / invalid-key / unreachable / error
+        ok          是否通过了真实调用
+        latency_ms  上游往返耗时；未发起调用时为 None
+        detail      人话说明（绝不包含密钥本身）
+    """
+    if not is_enabled():
+        return {"status": "off", "ok": True, "latency_ms": None,
+                "detail": "查询改写已关闭，无需校验密钥"}
+    api_key = os.environ.get("REWRITE_API_KEY", "").strip()
+    if not api_key:
+        return {"status": "no-key", "ok": False, "latency_ms": None,
+                "detail": "未配置 REWRITE_API_KEY，改写会被静默跳过"}
+
+    started = time.monotonic()
+    try:
+        _call_upstream(PROBE_MESSAGE, api_key, ssl_context,
+                       max_tokens=1, timeout=PROBE_TIMEOUT)
+    except urllib.error.HTTPError as exc:
+        latency = int((time.monotonic() - started) * 1000)
+        # 401/403 是「密钥不对或没权限」，其余状态码算上游异常，两者要分开报：
+        # 前者要去换密钥，后者多半等一会儿就好
+        if exc.code in (401, 403):
+            return {"status": "invalid-key", "ok": False, "latency_ms": latency,
+                    "detail": f"上游返回 {exc.code}，密钥无效或无权限"}
+        return {"status": "error", "ok": False, "latency_ms": latency,
+                "detail": f"上游返回 {exc.code}"}
+    except (urllib.error.URLError, OSError, ValueError, KeyError) as exc:
+        latency = int((time.monotonic() - started) * 1000)
+        return {"status": "unreachable", "ok": False, "latency_ms": latency,
+                "detail": f"无法连接上游：{exc}"}
+
+    latency = int((time.monotonic() - started) * 1000)
+    return {"status": "ok", "ok": True, "latency_ms": latency,
+            "detail": "上游调用成功，密钥可用"}

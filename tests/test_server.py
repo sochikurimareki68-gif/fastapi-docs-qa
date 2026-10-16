@@ -245,9 +245,9 @@ class TestHealthEndpoint(ServerTestCase):
         server.DIFY_API_KEY = self._api_key
         super().tearDown()
 
-    def health(self) -> dict:
+    def health(self, query: str = "") -> dict:
         handler = make_handler()
-        handler.path = "/api/health"
+        handler.path = "/api/health" + query
         handler.do_GET()
         return json.loads(response_text(handler).split("\r\n\r\n", 1)[1])
 
@@ -266,6 +266,33 @@ class TestHealthEndpoint(ServerTestCase):
             data = self.health()
         self.assertTrue(data["query_rewrite"]["key_ready"])
         self.assertFalse(data["query_rewrite"]["enabled"])
+
+    def test_plain_health_does_not_probe(self) -> None:
+        """默认不能触发探针 —— 健康检查可能被轮询，探针会一直花额度。"""
+        with mock.patch.object(server.query_rewrite, "probe") as probe:
+            self.health()
+            self.health("?deep=0")
+            probe.assert_not_called()
+
+    def test_deep_health_runs_probe(self) -> None:
+        fake = {"status": "ok", "ok": True, "latency_ms": 123, "detail": "上游调用成功，密钥可用"}
+        with mock.patch.dict("os.environ", {"REWRITE_API_KEY": "ark-test"}):
+            with mock.patch.object(server.query_rewrite, "probe", return_value=fake) as probe:
+                data = self.health("?deep=1")
+        self.assertEqual(data["query_rewrite"]["probe"], fake)
+        self.assertTrue(probe.call_args.kwargs["ssl_context"] is server.SSL_CONTEXT)
+
+    def test_deep_health_surfaces_invalid_key(self) -> None:
+        """探针失败也返回 200 —— 健康检查本身是通的，失败信息在 probe 段里。"""
+        fake = {"status": "invalid-key", "ok": False, "latency_ms": 88, "detail": "上游返回 401，密钥无效或无权限"}
+        with mock.patch.object(server.query_rewrite, "probe", return_value=fake):
+            handler = make_handler()
+            handler.path = "/api/health?deep=yes"
+            handler.do_GET()
+        text = response_text(handler)
+        self.assertIn("200 OK", text)
+        self.assertEqual(json.loads(text.split("\r\n\r\n", 1)[1])
+                         ["query_rewrite"]["probe"]["status"], "invalid-key")
 
 
 class TestStaticFiles(ServerTestCase):

@@ -460,3 +460,4 @@ with open("log.txt", mode="w") as email_file:
 | 火山引擎的两把密钥很容易拿错 | 登记文件里 `火山引擎` 与 `Agent Plan` 两行都是 `ark-` 开头、长度相同；后者对火山方舟的对话接口返回 **401 Unauthorized**，线上的改写静默回退，表现成「配了也没生效」 | 只用 `火山引擎` 那行（实测 200）；拿不准就用「改写是否生效」来反证，别靠肉眼看密钥 |
 | 线上日志被块缓冲吞掉，排查变成盲猜 | Render 上 stdout 是块缓冲的，`print()` 写的「查询改写失败」迟迟不出现，只能看到「改写没生效」这个现象 | 设 `PYTHONUNBUFFERED=1`，并在关键失败日志上显式 `flush=True`；更彻底的做法是把结果做进响应里（本例的 `query` 事件带 `kind`），不依赖日志 |
 | 「变量存在」不等于「变量可用」 | `/api/health` 一开始只报 `api_key_ready`（非空即真），于是线上 401 时它照样显示就绪 | 健康检查区分「已配置」与「可用」；本例靠 `kind=fallback` + 日志里的 401 才定位到密钥拿错 |
+| 健康检查停在「已配置」这一层，把上次的教训留在了原处 | 定位到密钥拿错之后，`/api/health` 仍然只报 `key_ready`（非空即真）—— 同一个坑下次还会踩，而且下次没有日志兜底 | 加 `/api/health?deep=1` 深检：真发一次 1 token 的上游请求，把结果收敛成 `probe.status`（`ok` / `invalid-key` / `unreachable` / `error` / `no-key` / `off`），未发起调用时不写 `probe` 段。默认关闭，避免被轮询的健康检查自己耗额度；401/403 单独报成 `invalid-key`（要去换密钥）而不混进 `error`（等一会儿就好）。实测：真密钥 `status=ok, latency 2.7s`；换成一把编造的 `ark-` 密钥 `status=invalid-key, "上游返回 401"`，耗时 113ms |

@@ -14,6 +14,8 @@ FastAPI 文档智能问答助手 · 轻量后端代理
 
 对外提供三个接口：
     GET  /api/health       →  告诉前端"后端是否就绪、密钥是否已配置"
+                              加 ?deep=1 时额外真发一次极短的上游请求，
+                              把改写密钥「是否可用」（而非仅「非空」）也报出来
     POST /api/chat         →  接收 {"message": "..."}，以 SSE 流式返回回答
                               （user / conversation_id 由服务端管理，客户端传了也不采信）
     POST /api/chat/reset   →  「新对话」：清空当前会话与 Dify 会话的映射，
@@ -54,7 +56,7 @@ import urllib.request
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import query_rewrite   # 本地模块：口语化提问 → 带官方术语的检索式（见 query_rewrite.py 文件头）
 
@@ -406,9 +408,10 @@ class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
     def do_GET(self) -> None:  # noqa: N802
         self._pending_cookie = ""      # 同一连接会连续处理多个请求，进入时必须清空
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
         if path == "/api/health":
-            self._send_json(200, {
+            payload = {
                 "ok": True,
                 "api_base": DIFY_BASE,
                 "api_key_ready": bool(DIFY_API_KEY),
@@ -419,7 +422,13 @@ class Handler(BaseHTTPRequestHandler):
                     "key_ready": query_rewrite.is_configured(),
                     "model": query_rewrite.model_name(),
                 },
-            })
+            }
+            # 深检（?deep=1）：key_ready 只说明「变量非空」，区分不了「填错了另一把
+            # 长得一样的密钥」。带上 deep=1 时真发一次极短的上游请求，把有效性也报出来。
+            # 它会消耗一点额度，所以默认不跑，只给排障时手动触发。
+            if parse_qs(parsed.query).get("deep", ["0"])[0].lower() in {"1", "true", "yes"}:
+                payload["query_rewrite"]["probe"] = query_rewrite.probe(ssl_context=SSL_CONTEXT)
+            self._send_json(200, payload)
             return
         self._serve_static(path)
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest import mock
 
@@ -135,6 +136,74 @@ class TestRewriteQuery(RewriteTestCase):
         """越界提问的兜底规则写在提示词里，这里守住它不被误删。"""
         self.assertIn("原样输出", query_rewrite.REWRITE_SYSTEM_PROMPT)
         self.assertIn("无关", query_rewrite.REWRITE_SYSTEM_PROMPT)
+
+
+class TestProbe(RewriteTestCase):
+    """深检探针：把「变量非空」升级为「密钥真能用」。
+
+    线上就栽在这上面 —— 填错另一把外形相同的 ark- 密钥后，key_ready 依旧是
+    true，探针必须能把它判成 invalid-key。
+    """
+
+    def http_error(self, code: int) -> urllib.error.HTTPError:
+        error = urllib.error.HTTPError("https://ark.example.com", code, "boom", {}, None)
+        self.addCleanup(error.close)     # 不关会触发 tempfile 的 ResourceWarning
+        return error
+
+    def test_ok_reports_latency(self) -> None:
+        with mock.patch.object(query_rewrite, "_call_upstream", return_value="hi") as upstream:
+            result = query_rewrite.probe()
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["status"], "ok")
+        self.assertIsInstance(result["latency_ms"], int)
+        upstream.assert_called_once()
+
+    def test_probe_uses_minimal_request(self) -> None:
+        """探针要便宜：1 token + 短超时，别把改写那套 20 秒默认值带进来。"""
+        with mock.patch.object(query_rewrite, "_call_upstream", return_value="hi") as upstream:
+            query_rewrite.probe()
+        _, kwargs = upstream.call_args
+        self.assertEqual(kwargs["max_tokens"], 1)
+        self.assertEqual(kwargs["timeout"], query_rewrite.PROBE_TIMEOUT)
+
+    def test_invalid_key(self) -> None:
+        with mock.patch.object(query_rewrite, "_call_upstream", side_effect=self.http_error(401)):
+            result = query_rewrite.probe()
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "invalid-key")
+        self.assertIn("401", result["detail"])
+
+    def test_upstream_error_is_not_reported_as_invalid_key(self) -> None:
+        """500 是上游抽风，不是密钥问题 —— 报错要能区分，否则会去白折腾一遍密钥。"""
+        with mock.patch.object(query_rewrite, "_call_upstream", side_effect=self.http_error(500)):
+            result = query_rewrite.probe()
+        self.assertEqual(result["status"], "error")
+
+    def test_unreachable(self) -> None:
+        with mock.patch.object(query_rewrite, "_call_upstream", side_effect=OSError("timed out")):
+            result = query_rewrite.probe()
+        self.assertEqual(result["status"], "unreachable")
+        self.assertFalse(result["ok"])
+
+    def test_no_key_does_not_call_upstream(self) -> None:
+        with mock.patch.dict("os.environ", {"REWRITE_API_KEY": ""}):
+            with mock.patch.object(query_rewrite, "_call_upstream") as upstream:
+                result = query_rewrite.probe()
+                upstream.assert_not_called()
+        self.assertEqual(result["status"], "no-key")
+
+    def test_switch_off_skips_probe(self) -> None:
+        with mock.patch.dict("os.environ", {"QUERY_REWRITE": "off"}):
+            with mock.patch.object(query_rewrite, "_call_upstream") as upstream:
+                result = query_rewrite.probe()
+                upstream.assert_not_called()
+        self.assertEqual(result["status"], "off")
+        self.assertTrue(result["ok"])      # 关了就没什么可验的，不算失败
+
+    def test_detail_never_leaks_key(self) -> None:
+        with mock.patch.object(query_rewrite, "_call_upstream", return_value="hi"):
+            result = query_rewrite.probe()
+        self.assertNotIn("test-key", result["detail"])
 
 
 if __name__ == "__main__":

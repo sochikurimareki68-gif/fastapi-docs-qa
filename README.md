@@ -115,8 +115,17 @@ python3 server.py
 - **部署后先看一眼 `/api/health`**：它除了 Dify 密钥状态，还会汇报查询改写是否就绪 ——
   `"query_rewrite": {"enabled": true, "key_ready": true, "model": "glm-5-3-flash-260828"}`。
   `key_ready: false` 说明 `REWRITE_API_KEY` 没配或为空（不配也不会报错，只是没有改写这一步）。
-  注意它只保证「变量非空」，**不保证密钥有效** —— 密钥拿错（例如把火山引擎的 Agent Plan 密钥
-  当成普通 `ark-` 密钥用）会返回 401，表现是改写静默回退、问答照常但检索质量下降。
+- **再加 `?deep=1` 做深检**：`/api/health?deep=1` 会**真发一次极短的上游请求**（1 token），
+  在 `query_rewrite.probe` 里汇报密钥「是否真的可用」，补上 `key_ready` 只判「变量非空」的缺口：
+
+  ```json
+  "probe": {"status": "ok", "ok": true, "latency_ms": 2717, "detail": "上游调用成功，密钥可用"}
+  ```
+
+  `status` 取值：`ok` / `invalid-key`（401、403，密钥拿错或没权限）/ `unreachable`（连不上上游）/
+  `error`（上游返回其它状态码）/ `no-key` / `off`。探针本身会消耗一点额度，所以**默认不跑**，
+  只在排障时手动带上 `deep=1`。（血泪教训：密钥拿错时 `key_ready` 依旧为 `true`，
+  改写静默回退、问答照常但检索质量下降，见 [docs/rag-design.md](docs/rag-design.md) 第八章。）
 - 需要自定义限流 / 请求体上限等参数时，按 `.env.example` 在控制台追加同名环境变量即可（所有变量都有默认值）。
 - 若部署到别的平台（Railway / Fly.io 等），`Procfile`（`web: python server.py`）同样可用。
 
@@ -167,4 +176,5 @@ python3 eval/run_eval.py --out /tmp/try.md     # 也可以自己指定报告路�
 - [x] 阶段 7+++：语料复核 —— 修正被误判的跳过名单（`dependencies/index.md` 250 行、`security/index.md` 106 行其实是章节正文），收回后语料 48 → 50 篇（正好用满免费版单库上限）；同时发现 c14 因未写 `expect_docs` 而掩盖的漏检，补上判据后全量用例复跑无回归
 - [x] 阶段 7++++：查询改写 —— 检索前把口语提问改写成带官方术语的检索式（`query_rewrite.py`，火山方舟 `glm-5-3-flash`，失败自动回退原问题）；严格口径 95.8% → **100%**、引用相关度 0.84 → **0.96**、越界拒答零回归，代价是延迟 +0.6s
 - [x] 阶段 7+++++：可溯源判定 —— 给评测加一层「回答里模型标成代码的 API 实体必须在引用片段里有出处」（新增「答案可溯源率」指标、报告新增可溯源明细附录）；首跑 99.7%（666/668 个实体），2 个缺口人工复核为假阳性；为此把 `refs` 每段正文由 200 字符放宽到 800
+- [x] 阶段 7++++++：健康检查深检 —— `/api/health?deep=1` 真发一次 1 token 的上游请求，把改写密钥从「已配置」升级为「可用」（`probe.status`），默认关闭避免探针自己耗额度；实测真密钥 `ok`、编造密钥 `invalid-key`（401）
 - [x] 阶段 8：文档收尾 —— README（架构 / 快速开始 / 部署 / 评测 / 路线图）+ 设计文档 [docs/rag-design.md](docs/rag-design.md)
