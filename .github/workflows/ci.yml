@@ -1,9 +1,14 @@
-# CI：每次 push / PR 跑「语法检查 + 单元测试」
+# CI/CD：每次 push / PR 跑「语法检查 + 单元测试」，main 分支通过后再触发 Render 部署
 #
 # 为什么只跑这些：
 #   效果评测（eval/run_eval.py）需要真实 Dify 密钥与公网，而且每条用例要按分钟限流
 #   间隔发送，不适合放进 CI —— 密钥不能进仓库，跑一次还要十几分钟。
 #   所以 CI 守的是「代码没坏」（语法 + 边界逻辑），效果由人工跑评测保证（见 README）。
+#
+# 为什么部署要自己写：Render 那边虽然开着 Auto-Deploy「On Commit」，但服务当初是用公共
+# 仓库地址创建的，GitHub 与 Render 之间没有 webhook，推送根本不会触发部署（实测：线上
+# 落后 11 个提交）。所以改成「CI 跑通过后，由 GitHub Actions 调 Render 的 Deploy Hook」，
+# 链路两端都在自己手里，也能看到每次部署是哪个提交、哪次构建。
 name: CI
 
 on:
@@ -29,3 +34,24 @@ jobs:
 
       - name: 检查评测用例集可解析
         run: python -c "import json; json.load(open('eval/dataset.json', encoding='utf-8')); print('dataset.json OK')"
+
+  deploy:
+    # 只有 main 分支的推送才部署；PR 只跑测试
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: 触发 Render 部署（Deploy Hook）
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK" ]; then
+            echo "未配置 RENDER_DEPLOY_HOOK，跳过部署。"
+            echo "配置方式：仓库 Settings → Secrets and variables → Actions → New repository secret，"
+            echo "名称填 RENDER_DEPLOY_HOOK，值填 Render 服务 Settings → Deploy → Deploy Hook 那个 URL。"
+            exit 0
+          fi
+          # -f：HTTP 出错就让这步失败，别让「部署没触发」被静默吞掉
+          curl -fsS "$RENDER_DEPLOY_HOOK" > /dev/null
+          echo "已通知 Render 部署本提交（${{ github.sha }}），进度看 Render → Deploys"
+

@@ -5,6 +5,10 @@
 #
 # 说明：server.py 同时是静态文件服务器，会把 index.html 和 /api/* 一起托管在
 # 同一个域名下，所以部署后访问根路径即是可用 Demo（无需另配前端域名）。
+#
+# 部署是自动的，但不靠这个文件里的 Auto-Deploy：本服务用公共仓库地址创建，GitHub 与
+# Render 之间没有 webhook，Auto-Deploy 实际不生效。真正的自动部署在
+# .github/workflows/ci.yml —— 测试通过后调 Render 的 Deploy Hook（见 README「自动部署」）。
 
 services:
   - type: web
@@ -24,3 +28,7 @@ services:
         sync: false
       - key: DIFY_BASE
         value: https://api.dify.ai/v1
+      # 让 print 的日志立刻出现在 Render 日志里：默认 stdout 是块缓冲的，
+      # 排查时那句关键错误可能迟迟不刷出来（本项目踩过）
+      - key: PYTHONUNBUFFERED
+        value: "1"

@@ -98,9 +98,25 @@ python3 server.py
 | region | `singapore` | 离国内最近；若提示区域不可用，删除该行改用默认区域 |
 | envVars | `DIFY_API_KEY`（控制台填）/ `REWRITE_API_KEY`（控制台填，查询改写用）/ `DIFY_BASE` | 密钥只在服务端持有，绝不发给前端 |
 
+**自动部署（CI/CD）**
+
+`.github/workflows/ci.yml` 里除「语法检查 + 单元测试」外还有一个 `deploy` 任务：main 分支的推送在测试通过后，用 Render 的 **Deploy Hook** 触发部署。**为什么要自己接一遍**：本服务当初是用公共仓库地址创建的，GitHub 与 Render 之间没有 webhook，Render 控制台里的 Auto-Deploy「On Commit」实际不生效 —— 实测线上曾因此落后 11 个提交（提交推上去了，服务还是三天前的代码）。改成 Actions 调 Deploy Hook 后，链路两端都在自己手里，也能从 Actions 页看到「哪次提交触发了哪次部署」。
+
+配置方式（一次性）：
+
+1. Render → 服务 → **Settings → Deploy → Deploy Hook**，复制那串 `https://api.render.com/deploy/...`
+2. GitHub 仓库 → **Settings → Secrets and variables → Actions → New repository secret**，名称填 `RENDER_DEPLOY_HOOK`，值粘贴上一步的 URL
+
+没配这个 Secret 时，`deploy` 任务会打印一段提示然后跳过（不会让 CI 变红），所以本地 fork 或没接 Render 的仓库也能正常跑测试。
+
 **部署后**
 
 - 访问 `https://<服务名>.onrender.com/` 即为完整 Demo —— `server.py` 同时是静态文件服务器，把 `index.html` 与 `/api/*` 托管在同一域名下，**前后端同源，无需另配前端域名或 CORS**。
+- **部署后先看一眼 `/api/health`**：它除了 Dify 密钥状态，还会汇报查询改写是否就绪 ——
+  `"query_rewrite": {"enabled": true, "key_ready": true, "model": "glm-5-3-flash-260828"}`。
+  `key_ready: false` 说明 `REWRITE_API_KEY` 没配或为空（不配也不会报错，只是没有改写这一步）。
+  注意它只保证「变量非空」，**不保证密钥有效** —— 密钥拿错（例如把火山引擎的 Agent Plan 密钥
+  当成普通 `ark-` 密钥用）会返回 401，表现是改写静默回退、问答照常但检索质量下降。
 - 需要自定义限流 / 请求体上限等参数时，按 `.env.example` 在控制台追加同名环境变量即可（所有变量都有默认值）。
 - 若部署到别的平台（Railway / Fly.io 等），`Procfile`（`web: python server.py`）同样可用。
 
