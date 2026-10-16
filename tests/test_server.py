@@ -165,36 +165,55 @@ class TestSessionStore(ServerTestCase):
         self.store = server.SessionStore()
 
     def test_new_session_gets_server_side_identity(self) -> None:
-        token, user_id, conversation_id = self.store.resolve("")
+        token, user_id, conversation_id, epoch = self.store.resolve("")
         self.assertTrue(token)
         self.assertTrue(user_id.startswith("web_"))
         self.assertEqual(conversation_id, "")
+        self.assertEqual(epoch, 0)
 
     def test_same_token_keeps_identity(self) -> None:
-        token, user_id, _ = self.store.resolve("")
+        token, user_id, _, _ = self.store.resolve("")
         again = self.store.resolve(token)
         self.assertEqual(again[0], token)
         self.assertEqual(again[1], user_id)
 
     def test_conversation_mapping_and_reset(self) -> None:
-        token, _, _ = self.store.resolve("")
-        self.store.set_conversation(token, "conv-1")
+        token, _, _, epoch = self.store.resolve("")
+        self.store.set_conversation(token, "conv-1", epoch)
         self.assertEqual(self.store.resolve(token)[2], "conv-1")
         self.store.clear_conversation(token)
         self.assertEqual(self.store.resolve(token)[2], "")
+
+    def test_reset_voids_in_flight_writes(self) -> None:
+        """「新对话」点下去之后，那条还在途中的回答不许把旧会话写回来。
+
+        否则界面清了、模型却还记得上文，「新对话」形同虚设 —— 竞态如下：
+        请求开始（记下 epoch）→ 用户点新对话（epoch +1）→ 旧请求收到 conversation_id
+        再写回。所以写回时必须比对 epoch。
+        """
+        token, _, _, epoch = self.store.resolve("")
+        self.store.clear_conversation(token)              # 用户在流式途中点了「新对话」
+        self.store.set_conversation(token, "conv-stale", epoch)
+        self.assertEqual(self.store.resolve(token)[2], "")
+
+        # 新一轮请求拿到的 epoch 已经变了，它的写回必须照常生效
+        *_, fresh_epoch = self.store.resolve(token)
+        self.store.set_conversation(token, "conv-new", fresh_epoch)
+        self.assertEqual(self.store.resolve(token)[2], "conv-new")
 
     def test_unknown_token_creates_new_session(self) -> None:
         self.assertNotEqual(self.store.resolve("not-exist")[0], "not-exist")
 
     def test_expired_sessions_are_swept(self) -> None:
-        token, _, _ = self.store.resolve("")
+        token, _, _, _ = self.store.resolve("")
         self.store._data[token]["seen"] = time.time() - server.SESSION_TTL - 1
         self.store.resolve("")            # 任何一次 resolve 都会先 sweep
         self.assertNotIn(token, self.store._data)
 
     def test_session_capacity_is_capped(self) -> None:
         self.store._data = {
-            f"t{i}": {"user_id": f"u{i}", "conversation_id": "", "seen": time.time() - i}
+            f"t{i}": {"user_id": f"u{i}", "conversation_id": "", "epoch": 0,
+                      "seen": time.time() - i}
             for i in range(server.MAX_SESSIONS + 5)
         }
         self.store.resolve("")
@@ -293,6 +312,29 @@ class TestHealthEndpoint(ServerTestCase):
         self.assertIn("200 OK", text)
         self.assertEqual(json.loads(text.split("\r\n\r\n", 1)[1])
                          ["query_rewrite"]["probe"]["status"], "invalid-key")
+
+    def test_deep_health_is_rate_limited(self) -> None:
+        """深检每次都要真调一次上游，所以要走限流；否则它就是个无成本的刷额度入口。"""
+        saved = server.LIMITER
+        server.LIMITER = server.RateLimiter()
+        try:
+            with mock.patch.object(server, "IP_PER_MINUTE", 1):
+                with mock.patch.object(server.query_rewrite, "probe",
+                                       return_value={"status": "ok", "ok": True,
+                                                     "latency_ms": 1, "detail": ""}) as probe:
+                    self.assertIn("200 OK", response_text(self.raw_health("?deep=1")))
+                    second = response_text(self.raw_health("?deep=1"))
+                    self.assertIn("429", second)
+                    self.assertIn("Retry-After", second)
+                    probe.assert_called_once()
+        finally:
+            server.LIMITER = saved
+
+    def raw_health(self, query: str) -> server.Handler:
+        handler = make_handler()
+        handler.path = "/api/health" + query
+        handler.do_GET()
+        return handler
 
 
 class TestStaticFiles(ServerTestCase):
@@ -424,11 +466,12 @@ class TestPumpStream(ServerTestCase):
     def setUp(self) -> None:
         super().setUp()
         server.SESSIONS = server.SessionStore()
-        self.token, _, _ = server.SESSIONS.resolve("")
+        self.token, _, _, self.epoch = server.SESSIONS.resolve("")
 
-    def pump(self, *events: dict) -> str:
+    def pump(self, *events: dict, epoch: int | None = None) -> str:
         handler = make_handler()
-        handler._pump_stream(sse_stream(*events), self.token)
+        handler._pump_stream(sse_stream(*events), self.token, "", "",
+                             self.epoch if epoch is None else epoch)
         return response_text(handler)
 
     def test_meta_delta_refs_done(self) -> None:
@@ -510,6 +553,27 @@ class TestPumpStream(ServerTestCase):
     def test_error_without_message_uses_fallback(self) -> None:
         raw = self.pump({"event": "error", "code": "boom"})
         self.assertIn("知识库服务返回了异常", raw)
+
+
+class TestClientIp(ServerTestCase):
+    """限流按哪个 IP 分桶。前置是 Cloudflare + Render 两层反代，socket 上看到的不是用户。"""
+
+    def ip(self, headers: dict) -> str:
+        return make_handler(headers)._client_ip()
+
+    def test_prefers_cloudflare_header(self) -> None:
+        """CF-Connecting-IP 由 Cloudflare 覆写，客户端伪造不了，所以优先级最高。"""
+        self.assertEqual(
+            self.ip({"CF-Connecting-IP": "203.0.113.9", "X-Forwarded-For": "1.2.3.4"}),
+            "203.0.113.9",
+        )
+
+    def test_falls_back_to_forwarded_for(self) -> None:
+        self.assertEqual(self.ip({"X-Forwarded-For": "198.51.100.7, 10.0.0.1"}), "198.51.100.7")
+
+    def test_falls_back_to_socket_peer(self) -> None:
+        """本地直接跑（没有反代）时用 socket 对端地址。"""
+        self.assertEqual(self.ip({}), "1.2.3.4")      # make_handler 里的 client_address
 
 
 if __name__ == "__main__":

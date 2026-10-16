@@ -231,8 +231,13 @@ class SessionStore:
         while len(self._data) >= MAX_SESSIONS:
             self._data.pop(min(self._data, key=lambda t: self._data[t]["seen"]), None)
 
-    def resolve(self, token: str) -> tuple[str, str, str]:
-        """返回 (token, user_id, conversation_id)。cookie 缺失/失效时新建会话。"""
+    def resolve(self, token: str) -> tuple[str, str, str, int]:
+        """返回 (token, user_id, conversation_id, epoch)。cookie 缺失/失效时新建会话。
+
+        epoch 是「会话世代」，每次「新对话」+1。请求开始时把它记下来，等回答流里
+        真拿到 conversation_id 再对一次 —— 这就是「新对话」点了却像没点的问题所在：
+        见 set_conversation。
+        """
         with self._lock:
             self._sweep()
             if not token or token not in self._data:
@@ -240,25 +245,35 @@ class SessionStore:
                 self._data[token] = {
                     "user_id": f"web_{token[:12]}",   # 由服务端生成，客户端无法指定
                     "conversation_id": "",
+                    "epoch": 0,
                     "seen": time.time(),
                 }
             session = self._data[token]
             session["seen"] = time.time()
-            return token, session["user_id"], session["conversation_id"]
+            return token, session["user_id"], session["conversation_id"], session["epoch"]
 
-    def set_conversation(self, token: str, conversation_id: str) -> None:
-        """首轮回答里拿到 Dify 会话 ID 后，记到服务端的会话映射上。"""
+    def set_conversation(self, token: str, conversation_id: str, epoch: int) -> None:
+        """首轮回答里拿到 Dify 会话 ID 后，记到服务端的会话映射上。
+
+        epoch 对不上说明这条请求在途中用户点了「新对话」：界面已经清空了，但这条
+        迟到的上游结果会把这个旧 conversation_id 又写回去 —— 于是下一轮提问模型
+        仍然记得上文，「新对话」形同虚设。所以世代变了就丢弃，不写。
+        """
         with self._lock:
             session = self._data.get(token)
-            if session:
+            if session and session["epoch"] == epoch:
                 session["conversation_id"] = conversation_id
 
     def clear_conversation(self, token: str) -> None:
-        """「新对话」：清空该会话与 Dify 会话的映射，下一轮从首轮开始。"""
+        """「新对话」：清空该会话与 Dify 会话的映射，下一轮从首轮开始。
+
+        同时把世代 +1，让所有「已经在路上」的请求作废，避免它们把旧会话写回来。
+        """
         with self._lock:
             session = self._data.get(token)
             if session:
                 session["conversation_id"] = ""
+                session["epoch"] += 1
 
 
 SESSIONS = SessionStore()
@@ -361,7 +376,17 @@ class Handler(BaseHTTPRequestHandler):
     # 访问保护
     # ------------------------------------------------------------------
     def _client_ip(self) -> str:
-        """取真实客户端 IP。Render 之类平台会经反代，真实 IP 在 X-Forwarded-For 里。"""
+        """取真实客户端 IP —— 限流按它分桶。
+
+        Render 这类平台会经反代（前面还有一层 Cloudflare），后端 socket 上看到的是
+        代理地址，真实 IP 只在反代头里。优先用 `CF-Connecting-IP`：它由 Cloudflare
+        覆写，客户端伪造不了；`X-Forwarded-For` 只能退而求其次 —— 它通常是「追加」，
+        最左值可能是客户端自己填的假值（所以单 IP 限额只能算尽力而为，真正兜底的是
+        全站每日上限）。
+        """
+        cf_ip = (self.headers.get("CF-Connecting-IP") or "").strip()
+        if cf_ip:
+            return cf_ip
         forwarded = self.headers.get("X-Forwarded-For", "")
         if forwarded:
             return forwarded.split(",")[0].strip()
@@ -425,8 +450,13 @@ class Handler(BaseHTTPRequestHandler):
             }
             # 深检（?deep=1）：key_ready 只说明「变量非空」，区分不了「填错了另一把
             # 长得一样的密钥」。带上 deep=1 时真发一次极短的上游请求，把有效性也报出来。
-            # 它会消耗一点额度，所以默认不跑，只给排障时手动触发。
+            # 它会消耗一点额度，所以默认不跑，只给排障时手动触发 —— 也正因为要花额度，
+            # 这一条走和 /api/chat 同一套限流，免得被无成本地反复刷。
             if parse_qs(parsed.query).get("deep", ["0"])[0].lower() in {"1", "true", "yes"}:
+                allowed, reason, retry_after = LIMITER.check(self._client_ip())
+                if not allowed:
+                    self._send_json(429, {"error": reason}, retry_after)
+                    return
                 payload["query_rewrite"]["probe"] = query_rewrite.probe(ssl_context=SSL_CONTEXT)
             self._send_json(200, payload)
             return
@@ -550,7 +580,7 @@ class Handler(BaseHTTPRequestHandler):
         # 身份与会话都由服务端决定：客户端传什么都不采信。
         # 每次都下发 cookie —— 会话有效时相当于刷新有效期，用户持续使用就不会掉线。
         # 走 HTTPS 时加上 Secure，避免 cookie 在明文信道上被截走（本地开发是 http，不加）。
-        token, user_id, conversation_id = SESSIONS.resolve(self._read_cookie(SESSION_COOKIE))
+        token, user_id, conversation_id, epoch = SESSIONS.resolve(self._read_cookie(SESSION_COOKIE))
         secure = "; Secure" if self._is_https() else ""
         self._pending_cookie = (
             f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; "
@@ -614,7 +644,7 @@ class Handler(BaseHTTPRequestHandler):
         self._sse_start()
         try:
             # 一律把「改写结果 + 检索式」下发（前端只在改写成功时显示检索式）
-            self._pump_stream(resp, token, query, rewrite_kind)
+            self._pump_stream(resp, token, query, rewrite_kind, epoch)
         except (BrokenPipeError, ConnectionResetError):
             pass  # 用户中途关掉页面，正常情况
         finally:
@@ -648,7 +678,8 @@ class Handler(BaseHTTPRequestHandler):
         SESSIONS.clear_conversation(self._read_cookie(SESSION_COOKIE))
         self._send_json(200, {"ok": True})
 
-    def _pump_stream(self, resp, token: str, retrieval_query: str = "", rewrite_kind: str = "") -> None:
+    def _pump_stream(self, resp, token: str, retrieval_query: str = "", rewrite_kind: str = "",
+                     epoch: int = 0) -> None:
         """把 Dify 的 SSE 事件翻译成前端约定的六类事件：query / meta / delta / refs / error / done。
 
         Dify 与扣子的流格式不同：只有 data: 行，事件类型在 JSON 的 event 字段里
@@ -657,6 +688,9 @@ class Handler(BaseHTTPRequestHandler):
         最先推的 query 事件带两个字段：`kind` 是改写结果（rewritten / unchanged / fallback /
         no-key / off），`query` 是实际送去检索的语句。前端只在 kind=rewritten 时显示检索式；
         其余标记留着排查用 —— 线上出问题时，一眼就能看出是「没配密钥」还是「调用失败」。
+
+        epoch 是请求开始时记下的会话世代，写回 conversation_id 时要拿它对一次
+        （用户中途点「新对话」就不许旧结果写回，见 SessionStore.set_conversation）。
         """
         conversation_id = ""
         sent_meta = False
@@ -695,7 +729,7 @@ class Handler(BaseHTTPRequestHandler):
                 # 下一轮由服务端自己带上，不依赖客户端回传。
                 conversation_id = evt.get("conversation_id") or conversation_id
                 if conversation_id and not sent_meta:
-                    SESSIONS.set_conversation(token, conversation_id)
+                    SESSIONS.set_conversation(token, conversation_id, epoch)
                     self._sse_send("meta", json.dumps({"conversation_id": conversation_id}, ensure_ascii=False))
                     sent_meta = True
                 piece = evt.get("answer") or ""

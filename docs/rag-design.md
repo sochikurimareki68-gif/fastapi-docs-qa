@@ -198,9 +198,11 @@ for r in resources:
 | 请求体限制 | body ≤ 4096 字节，问题 ≤ 500 字；只接受带 `Content-Length` 的请求（`Transfer-Encoding: chunked` 与非法长度直接 411 / 400 并断开连接） | 防大包攻击与超长输入；不解析的 body 必须断开，否则残留字节会污染长连接上的下一个请求 |
 | 并发闸门 | 同时在处理 ≤ 6 个，超出的立刻 503（不排队） | 每个请求占一个线程 + 一条最长 120 秒的上游连接，不设上限容易被并发刷满 |
 
-**会话隔离**：`user_id` 与 `conversation_id` 全部由服务端生成并保管，浏览器只拿到一个不透明的 `HttpOnly` Cookie（`qa_session`）。客户端传什么都不采信 —— 否则调用方可以伪造 ID 去读别人的对话。用户点「新对话」时，服务端只是把该会话的 `conversation_id` 清空，下一轮自然开启新会话。Cookie 还带 `SameSite=Lax`，并在通过 `X-Forwarded-Proto` 判定为 HTTPS 时自动加 `Secure`（本地 http 开发不加，否则浏览器根本收不下这个 Cookie）。
+限流按什么 IP 分桶是个容易被忽略的细节：服务在 Render 上，前面还有一层 Cloudflare，socket 对端是代理而不是用户，所以真实 IP 只能读反代头。这里优先用 **`CF-Connecting-IP`**（由 Cloudflare 覆写，客户端伪造不了），退而求其次才是 `X-Forwarded-For` 的最左值 —— 后者通常是「追加」语义，最左值可能是调用方自己填的假值，因此单 IP 限额只能算尽力而为，真正兜底的是全站每日上限。
 
-> 防护逻辑有单元测试兜底（`tests/test_server.py`，离线跑、毫秒级）：限流三段配额与窗口清理、会话 TTL 与容量上限、来源校验的放行/拒绝组合、`/api/chat` 前置拒绝分支（411 / 400 / 413 / 403 / 429 + `Retry-After` / 503）、以及 Dify 事件流到前端五类事件的翻译。CI（`.github/workflows/ci.yml`）在每次 push 时跑语法检查 + 单元测试。
+**会话隔离**：`user_id` 与 `conversation_id` 全部由服务端生成并保管，浏览器只拿到一个不透明的 `HttpOnly` Cookie（`qa_session`）。客户端传什么都不采信 —— 否则调用方可以伪造 ID 去读别人的对话。用户点「新对话」时，服务端把该会话的 `conversation_id` 清空，并把**会话世代（epoch）+1**：每个请求开始时记下当时的 epoch，等上游真的返回 `conversation_id` 要写回时再比对一次，不一致就丢弃。少了这一步会有一个隐蔽竞态 —— 在流式回答的中途点「新对话」，那条还在路上的请求会把旧 `conversation_id` 又写回去，界面清空了、模型却还记得上文。Cookie 还带 `SameSite=Lax`，并在通过 `X-Forwarded-Proto` 判定为 HTTPS 时自动加 `Secure`（本地 http 开发不加，否则浏览器根本收不下这个 Cookie）。
+
+> 防护逻辑有单元测试兜底（`tests/test_server.py`，离线跑、毫秒级）：限流三段配额与窗口清理、会话 TTL 与容量上限、会话世代作废在途写回、来源校验的放行/拒绝组合、取客户端 IP 的三级回退、深检的限流、`/api/chat` 前置拒绝分支（411 / 400 / 413 / 403 / 429 + `Retry-After` / 503）、以及 Dify 事件流到前端六类事件的翻译。CI（`.github/workflows/ci.yml`）在每次 push 时跑语法检查 + 单元测试。
 
 ---
 
@@ -461,3 +463,6 @@ with open("log.txt", mode="w") as email_file:
 | 线上日志被块缓冲吞掉，排查变成盲猜 | Render 上 stdout 是块缓冲的，`print()` 写的「查询改写失败」迟迟不出现，只能看到「改写没生效」这个现象 | 设 `PYTHONUNBUFFERED=1`，并在关键失败日志上显式 `flush=True`；更彻底的做法是把结果做进响应里（本例的 `query` 事件带 `kind`），不依赖日志 |
 | 「变量存在」不等于「变量可用」 | `/api/health` 一开始只报 `api_key_ready`（非空即真），于是线上 401 时它照样显示就绪 | 健康检查区分「已配置」与「可用」；本例靠 `kind=fallback` + 日志里的 401 才定位到密钥拿错 |
 | 健康检查停在「已配置」这一层，把上次的教训留在了原处 | 定位到密钥拿错之后，`/api/health` 仍然只报 `key_ready`（非空即真）—— 同一个坑下次还会踩，而且下次没有日志兜底 | 加 `/api/health?deep=1` 深检：真发一次 1 token 的上游请求，把结果收敛成 `probe.status`（`ok` / `invalid-key` / `unreachable` / `error` / `no-key` / `off`），未发起调用时不写 `probe` 段。默认关闭，避免被轮询的健康检查自己耗额度；401/403 单独报成 `invalid-key`（要去换密钥）而不混进 `error`（等一会儿就好）。实测：真密钥 `status=ok, latency 2.7s`；换成一把编造的 `ark-` 密钥 `status=invalid-key, "上游返回 401"`，耗时 113ms |
+| 「新对话」点了却像没点：在途请求把旧会话写回来 | 用户在**流式回答的中途**点「新对话」：服务端清空 `conversation_id` 的同时，那条还在路上的请求正好收到上游的 `conversation_id` 事件，又把它写了回去 —— 界面清空了，模型却还记得上文；前端也没有中止在途请求，输入框要等旧流结束才解锁 | 服务端引入**会话世代（epoch）**：请求开始时记下 epoch，写回 `conversation_id` 时比对，不一致（说明期间发生过重置）就丢弃；前端给 `/api/chat` 挂 `AbortController`，点「新对话」先 `abort()`，并用一个自增的请求序号保证「被顶掉的旧流不许再动 busy 状态」。实测（本机 Chrome）：流式中途点「新对话」→ 回合消失、hero 回来、输入框立即解锁、无控制台报错 |
+| aria-live 把半截答案反复念 | 上一轮给回答流加了 `role="log" + aria-live`，但回答是**每个 delta 整段重刷** innerHTML 的 —— 读屏器会照着每次 DOM 变化把已经念过的内容再念一遍 | 流式期间给 `.a-content` 加 `aria-busy="true"`（读屏器会等它变 false 再播报），收尾时移除 |
+| 单 IP 限流取错了头 | `X-Forwarded-For` 是**追加**语义，最左值可能是调用方自己填的假值 —— 每次换一个假 IP 就能绕开单 IP 限额 | 优先取 `CF-Connecting-IP`（Cloudflare 覆写，伪造不了），没有才回退到 `X-Forwarded-For`、再回退到 socket 对端；同时说明单 IP 限额本就是尽力而为，全站每日上限才是兜底 |

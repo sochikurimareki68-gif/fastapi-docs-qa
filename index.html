@@ -872,6 +872,10 @@
   var mode = 'checking';     // checking | live | unavailable
   var keyReady = false;
   var busy = false;
+  // 在途请求的中止器 + 请求序号：点「新对话」或发了新问题时，用它把上一条流作废
+  // （否则旧回答会继续往已被清空的界面上写，还会误把输入框解锁）
+  var activeCtrl = null;
+  var reqSeq = 0;
 
   var stream = document.getElementById('stream');
   var streamInner = document.getElementById('streamInner');
@@ -1213,10 +1217,16 @@
     busy = true;
     syncSendState();
     showTyping(ref.content);
+    // 流式期间把这段标成 aria-busy：回答是每个 delta 整段重刷的，不告诉读屏器
+    // 「还没写完」，它会照着 aria-live 把半截答案反复念一遍
+    ref.content.setAttribute('aria-busy', 'true');
 
     var answer = '';
     var gotDelta = false;
     var errored = false;
+    var ctrl = new AbortController();
+    var seq = ++reqSeq;      // 收尾时拿它对一次：序号变了说明这条流已被顶掉
+    activeCtrl = ctrl;
 
     function paint() {
       if (!gotDelta) {
@@ -1233,6 +1243,7 @@
     fetch('/api/chat', {
       method: 'POST',
       credentials: 'same-origin',
+      signal: ctrl.signal,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: question })
     }).then(function (resp) {
@@ -1304,7 +1315,6 @@
         ref.content.textContent = '';
         ref.content.appendChild(p);
       }
-      ref.content.classList.remove('streaming');
       // 出错时不挂「基于知识库」徽章：那句提示恰恰说明这次没有正确答案可依据
       if (!errored) {
         var badge = document.createElement('span');
@@ -1316,12 +1326,16 @@
       el.textContent = getTime();
       ref.meta.insertBefore(el, ref.meta.firstChild.nextSibling || null);
     }).catch(function (err) {
+      if (err && err.name === 'AbortError') return;   // 用户点了「新对话」，这段已经作废
       ref.content.className = 'a-content';
       var p = document.createElement('p');
       p.textContent = (err && err.message) ? ('请求失败：' + err.message) : '网络异常，请稍后再试。';
       ref.content.textContent = '';
       ref.content.appendChild(p);
     }).then(function () {
+      ref.content.removeAttribute('aria-busy');
+      if (seq !== reqSeq) return;    // 这条流已被「新对话」或新提问顶掉，不许再动全局状态
+      activeCtrl = null;
       busy = false;
       syncSendState();
     });
@@ -1329,6 +1343,12 @@
 
   function resetConversation() {
     // 清空界面并请服务端遗忘当前会话映射，下一轮从首轮开始
+    // 先掐断在途回答：服务端那边有「会话世代」兜底（旧结果不许写回），这里再把
+    // 流停掉，界面才真的是「新对话」——否则旧回答还在后台往下流，输入框也不解锁
+    if (activeCtrl) { activeCtrl.abort(); activeCtrl = null; }
+    reqSeq += 1;
+    busy = false;
+    syncSendState();
     var children = Array.prototype.slice.call(streamInner.children);
     children.forEach(function (el) { if (el !== hero) el.remove(); });
     showHero();
