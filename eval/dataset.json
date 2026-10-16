@@ -2,7 +2,7 @@
   "meta": {
     "name": "FastAPI 文档智能问答助手 · 效果评测用例集",
     "version": "v1.0",
-    "scope": "知识库 48 篇 FastAPI 官方中文文档对应模块 + 越界拒答",
+    "scope": "知识库 50 篇 FastAPI 官方中文文档对应模块 + 越界拒答",
     "modes": {
       "answer": "库内问题：回复须命中 expect_any 中至少一个关键词（答案准确率的代理指标）；引用命中率按「返回引用且命中 expect_docs 中任一文档」计算（Hit Rate@K），引用相关度（top-1 得分）单独统计",
       "refuse": "库外问题：回复须包含明确拒答表述（refusal_any 之一），或 top-1 引用得分 < 0.1（检索未命中即应拒答而非编造）"
@@ -120,7 +120,7 @@
       "mode": "answer",
       "input": "FastAPI 的依赖注入是什么，怎么用 Depends？",
       "expect_any": ["Depends", "依赖注入", "依赖"],
-      "expect_docs": null
+      "expect_docs": ["dependencies-index.md"]
     },
     {
       "id": "c15",

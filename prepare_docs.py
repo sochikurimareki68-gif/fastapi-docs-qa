@@ -23,9 +23,8 @@ FastAPI 文档预处理脚本
 
 输入：
     本地 FastAPI 仓库（默认 /tmp/fastapi-sparse）
-      - docs/zh/docs/tutorial/*.md    教程正文
-      - docs/zh/docs/*.md             教程之外补充收录的文档（见 EXTRA_DOCS）
-      - docs_src/**/*.py              真正的代码示例
+      - docs/zh/docs/tutorial/**/*.md   教程正文（含 dependencies/、security/ 子目录）
+      - docs_src/**/*.py                真正的代码示例
 
 输出：
     docs-source/**/*.md
@@ -52,21 +51,11 @@ OUT_DIR = Path(__file__).resolve().parent / "docs-source"
 # 官方文档地址前缀，用于给每篇附加"来源"链接
 BASE_URL = "https://fastapi.tiangolo.com/zh/tutorial/"
 
-# 纯导航页，正文内容少、易产生低质检索结果，跳过
-SKIP_FILES = {"index.md", "dependencies/index.md", "security/index.md"}
-
-# 补充收录：教程目录（tutorial/）之外、但与"大型项目结构"直接相关的官方文档。
-# 教程只讲了 APIRouter 这一条路，把应用拆开还有另外几种官方做法，收进来覆盖才算完整：
-#   - 拆成多个独立子应用并挂载
-#   - 配置独立成模块（官方在这一章里明确指向"更大的应用 - 多个文件"的文件结构）
-# 路径相对 docs/zh/docs/。注意：Dify 免费版单个知识库上限 50 篇文档，
-# 所以这几篇是精选过的，不能随便往里加（见 README「已知限制」）。
-EXTRA_DOCS = (
-    "advanced/sub-applications.md",
-    "advanced/settings.md",
-)
-# 教程之外文档的来源链接前缀
-DOCS_BASE_URL = "https://fastapi.tiangolo.com/zh/"
+# 只跳过教程总览页（纯导航 + 怎么运行示例）。
+# 注意：dependencies/index.md 与 security/index.md 虽然也叫 index，但都是正文——
+# 前者 250 行讲「什么是依赖注入」与 Depends 第一步，后者 106 行讲 OAuth2 概念；
+# 曾把这三个一起当导航页跳过，结果「依赖注入是什么」这类问题在库里没有正解文档。
+SKIP_FILES = {"index.md"}
 
 # 按扩展名推断代码块语言
 LANG_BY_EXT = {
@@ -188,28 +177,21 @@ def main() -> None:
     if OUT_DIR.exists():          # 每次重新生成，避免残留上一次的产物
         shutil.rmtree(OUT_DIR)
 
-    # 待处理清单：(源文件, 输出文件名, 官方原文链接)
-    # 输出名一律平铺（dependencies/xxx.md → dependencies-xxx.md），
-    # 这样全部文档都在同一层，可以一次性全选拖进知识库。
-    jobs: list[tuple[Path, str, str]] = []
+    written = 0
     skipped = 0
     for src in sorted(src_dir.rglob("*.md")):
         rel = src.relative_to(src_dir).as_posix()
         if rel in SKIP_FILES:
             skipped += 1
             continue
-        jobs.append((src, rel.replace("/", "-"), BASE_URL + rel[:-3] + "/"))
-    for rel in EXTRA_DOCS:
-        src = docs_root / rel
-        if not src.is_file():
-            raise SystemExit(f"补充收录的文档不存在：{src}")
-        jobs.append((src, rel.replace("/", "-"), DOCS_BASE_URL + rel[:-3] + "/"))
 
-    written = 0
-    for src, out_name, url in jobs:
         seen.clear()  # 每个文件独立去重
         body = clean_markdown(src.read_text(encoding="utf-8"), replacer)
-        out_path = OUT_DIR / out_name
+        url = BASE_URL + rel[:-3] + "/"       # 去掉 .md，补尾斜杠
+
+        # 平铺输出（dependencies/xxx.md → dependencies-xxx.md），
+        # 这样全部文档都在同一层，可以一次性全选拖进知识库
+        out_path = OUT_DIR / rel.replace("/", "-")
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(f"> 来源：{url}\n\n{body}\n", encoding="utf-8")
         written += 1
