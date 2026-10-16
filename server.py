@@ -78,12 +78,13 @@ HOST = os.environ.get("HOST", "0.0.0.0")
 # 访问保护（框架与项目一相同，教训直接沿用）
 #
 # 每次 /api/chat 都会消耗 Dify 应用的调用额度 —— 一个循环脚本就能在几分
-# 钟内把额度刷光、让整个 Demo 挂掉。所以加四层基础防护：
+# 钟内把额度刷光、让整个 Demo 挂掉。所以加五层基础防护：
 #
 #   1) 请求来源校验：只允许自家页面调用（本项目比项目一更严，见 Handler._origin_allowed）
 #   2) 单 IP 限流：每分钟 / 每天各有上限
 #   3) 全站每日总量上限：即使被换 IP 刷，也能兜底止损
 #   4) 请求体大小与问题长度限制
+#   5) 并发闸门：同时在处理的请求数封顶，超出的直接 503（见 ConcurrencyLimiter）
 #
 # 都是单实例内存实现（Render 免费版只有一个实例，够用）。全部可用环境变量覆盖。
 # ----------------------------------------------------------------------
@@ -92,6 +93,7 @@ MAX_MESSAGE_CHARS = int(os.environ.get("MAX_MESSAGE_CHARS", "500"))
 IP_PER_MINUTE = int(os.environ.get("IP_PER_MINUTE", "6"))
 IP_PER_DAY = int(os.environ.get("IP_PER_DAY", "60"))
 GLOBAL_PER_DAY = int(os.environ.get("GLOBAL_PER_DAY", "500"))
+MAX_CONCURRENT = int(os.environ.get("MAX_CONCURRENT", "6"))
 EXTRA_ORIGINS = [
     o.strip().rstrip("/") for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()
 ]
@@ -118,14 +120,18 @@ class RateLimiter:
         for ip in [ip for ip, dq in self._hits.items() if not dq or now - dq[-1] > 60]:
             self._hits.pop(ip, None)
 
-    def check(self, ip: str) -> tuple[bool, str]:
-        """消耗一次配额。返回 (是否放行, 拒绝原因)。"""
+    def check(self, ip: str) -> tuple[bool, str, int]:
+        """消耗一次配额。返回 (是否放行, 拒绝原因, 建议等待秒数)。
+
+        第 3 个返回值用于 Retry-After 响应头：被限流的客户端能自己知道该等多久，
+        而不是盲目重试把限额刷得更狠。
+        """
         with self._lock:
             self._roll_day()
             now = time.time()
 
             if self._global_day >= GLOBAL_PER_DAY:
-                return False, "今天的试用额度已经用完了，请明天再来～"
+                return False, "今天的试用额度已经用完了，请明天再来～", self._seconds_to_midnight()
 
             # 取出该 IP 的滑动窗口；过期时间戳清理后若窗口已空，则从字典移除
             # （空桶不删的话，只访问一次的 IP 会永久占一个条目，字典无限增长）。
@@ -140,18 +146,47 @@ class RateLimiter:
                 hits = deque()
 
             if len(hits) >= IP_PER_MINUTE:
-                return False, "提问有点快哦，请等一分钟再试～"
+                return False, "提问有点快哦，请等一分钟再试～", 60
             if self._ip_day.get(ip, 0) >= IP_PER_DAY:
-                return False, "您今天的提问次数已达上限，请明天再来～"
+                return False, "您今天的提问次数已达上限，请明天再来～", self._seconds_to_midnight()
 
             hits.append(now)
             self._hits[ip] = hits
             self._ip_day[ip] = self._ip_day.get(ip, 0) + 1
             self._global_day += 1
-            return True, ""
+            return True, "", 0
+
+    @staticmethod
+    def _seconds_to_midnight() -> int:
+        """距下一个本地零点还有多少秒（给「明天再来」这类提示做 Retry-After）。"""
+        now = time.localtime()
+        tomorrow = time.mktime((now.tm_year, now.tm_mon, now.tm_mday, 0, 0, 0, 0, 0, -1)) + 86400
+        return max(1, int(tomorrow - time.time()))
 
 
 LIMITER = RateLimiter()
+
+
+class ConcurrencyLimiter:
+    """并发闸门：限制同时在处理的请求数，超出的立即拒绝（不排队）。
+
+    为什么需要：每个 /api/chat 都会占一个线程，并向上游开一条最长 120 秒的连接。
+    ThreadingHTTPServer 来一个请求就开一个线程、没有上限，于是一小段并发脚本
+    就能把线程和上游连接堆满，让正常用户也拿不到服务。
+    用 BoundedSemaphore 非阻塞获取：拿不到名额就立刻回 503，避免请求越堆越多。
+    """
+
+    def __init__(self, limit: int) -> None:
+        self._sem = threading.BoundedSemaphore(max(1, limit))
+
+    def acquire(self) -> bool:
+        return self._sem.acquire(blocking=False)
+
+    def release(self) -> None:
+        self._sem.release()
+
+
+SLOTS = ConcurrencyLimiter(MAX_CONCURRENT)
 
 
 # ----------------------------------------------------------------------
@@ -177,7 +212,9 @@ class SessionStore:
         now = time.time()
         for token in [t for t, s in self._data.items() if now - s["seen"] > SESSION_TTL]:
             self._data.pop(token, None)
-        while len(self._data) > MAX_SESSIONS:
+        # sweep 是在「新建会话之前」调用的，所以这里要清到上限以下，插入后正好等于上限；
+        # 用 > 的话会稳定停在 MAX_SESSIONS + 1（被单元测试逮到过）。
+        while len(self._data) >= MAX_SESSIONS:
             self._data.pop(min(self._data, key=lambda t: self._data[t]["seen"]), None)
 
     def resolve(self, token: str) -> tuple[str, str, str]:
@@ -263,18 +300,20 @@ class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
     # 基础响应工具
     # ------------------------------------------------------------------
-    def _send_json(self, status: int, obj: dict) -> None:
+    def _send_json(self, status: int, obj: dict, retry_after: int = 0) -> None:
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if retry_after:
+            self.send_header("Retry-After", str(retry_after))
         if self._pending_cookie:
             self.send_header("Set-Cookie", self._pending_cookie)
         self.end_headers()
         self.wfile.write(body)
 
-    def _reject(self, status: int, error: str) -> None:
+    def _reject(self, status: int, error: str, retry_after: int = 0) -> None:
         """提前拒绝请求 —— 必须断开连接。
 
         这些分支往往在读取请求体之前就返回了。如果保持长连接，没读完的 body 会
@@ -282,7 +321,7 @@ class Handler(BaseHTTPRequestHandler):
         后端连接，于是后续请求全部损坏（项目一实测报 "Bad request syntax"）。
         """
         self.close_connection = True
-        self._send_json(status, {"error": error})
+        self._send_json(status, {"error": error}, retry_after)
 
     # SSE 用 chunked 编码逐块下发，保证前端能实时看到文字
     def _sse_start(self) -> None:
@@ -313,6 +352,15 @@ class Handler(BaseHTTPRequestHandler):
         if forwarded:
             return forwarded.split(",")[0].strip()
         return self.client_address[0]
+
+    def _is_https(self) -> bool:
+        """本次请求对外是不是 HTTPS，用于决定要不要给会话 cookie 加 Secure。
+
+        Render 之类平台在边缘终止 TLS，后端看到的永远是 http，真实协议放在
+        X-Forwarded-Proto 里。本地开发没有这个头，按 http 处理即可。
+        """
+        proto = (self.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
+        return proto == "https"
 
     def _read_cookie(self, name: str) -> str:
         """从 Cookie 头里取一个值（只取一个，够用）。"""
@@ -408,19 +456,27 @@ class Handler(BaseHTTPRequestHandler):
             self._reject(403, "请求来源不被允许")
             return
 
+        # ---- 分块传输直接拒绝：它的 body 我们不解析，既不读又不断开就会污染长连接 ----
+        if "chunked" in (self.headers.get("Transfer-Encoding") or "").lower():
+            self._reject(411, "暂不支持分块传输，请带上 Content-Length 发送请求")
+            return
+
         # ---- 第 4 层防护：请求体大小（只看 Content-Length 头，最便宜，先查）----
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             length = -1
+        if length < 0:      # 长度不合法时若继续往下走，rfile.read(-1) 会一直读到连接关闭
+            self._reject(400, "Content-Length 不合法")
+            return
         if length > MAX_BODY_BYTES:
             self._reject(413, "请求体过大")
             return
 
         # ---- 第 2、3 层防护：单 IP 限流 + 全站每日上限 ----
-        allowed, reason = LIMITER.check(self._client_ip())
+        allowed, reason, retry_after = LIMITER.check(self._client_ip())
         if not allowed:
-            self._reject(429, reason)
+            self._reject(429, reason, retry_after)
             return
 
         # ---- 密钥预检：没配密钥就明确报错，绝不静默降级返回假答案 ----
@@ -428,6 +484,19 @@ class Handler(BaseHTTPRequestHandler):
             self._reject(500, "服务端未配置 DIFY_API_KEY，请先在 .env 中填写 Dify 应用 API 密钥（app- 开头）")
             return
 
+        # ---- 第 5 层防护：并发闸门 ----
+        # 到这里才真正要去占用线程与上游连接，所以闸门放在这一层检查后面：
+        # 被限流/参数不合法的请求根本不该占名额。
+        if not SLOTS.acquire():
+            self._reject(503, "当前提问的人有点多，请稍后再试～")
+            return
+        try:
+            self._chat_with_upstream(length)
+        finally:
+            SLOTS.release()      # 无论正常结束还是中途出错，名额都必须还回去
+
+    def _chat_with_upstream(self, length: int) -> None:
+        """读请求体 → 转发给 Dify → 把上游的 SSE 流翻译后回给前端。"""
         # ---- 读 body 并解析 ----
         try:
             payload = json.loads(self.rfile.read(length) or b"{}")
@@ -448,9 +517,12 @@ class Handler(BaseHTTPRequestHandler):
 
         # 身份与会话都由服务端决定：客户端传什么都不采信。
         # 每次都下发 cookie —— 会话有效时相当于刷新有效期，用户持续使用就不会掉线。
+        # 走 HTTPS 时加上 Secure，避免 cookie 在明文信道上被截走（本地开发是 http，不加）。
         token, user_id, conversation_id = SESSIONS.resolve(self._read_cookie(SESSION_COOKIE))
+        secure = "; Secure" if self._is_https() else ""
         self._pending_cookie = (
-            f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL}"
+            f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; "
+            f"Max-Age={SESSION_TTL}{secure}"
         )
 
         # Dify 对话型应用接口：首轮不传 conversation_id，之后由服务端自动带上

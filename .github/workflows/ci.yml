@@ -1,0 +1,32 @@
+# CI：每次 push / PR 跑「语法检查 + 单元测试」
+#
+# 为什么只跑这些：
+#   效果评测（eval/run_eval.py）需要真实 Dify 密钥与公网，而且每条用例要按分钟限流
+#   间隔发送，不适合放进 CI —— 密钥不能进仓库，跑一次还要十几分钟。
+#   所以 CI 守的是「代码没坏」（语法 + 边界逻辑），效果由人工跑评测保证（见 README）。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 语法检查
+        run: |
+          python -m py_compile prepare_docs.py upload_docs.py server.py eval/run_eval.py tests/test_server.py
+
+      - name: 单元测试
+        run: python -m unittest discover -s tests -v
+
+      - name: 检查评测用例集可解析
+        run: python -c "import json; json.load(open('eval/dataset.json', encoding='utf-8')); print('dataset.json OK')"
