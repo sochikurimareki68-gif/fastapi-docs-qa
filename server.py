@@ -103,6 +103,12 @@ MAX_CONCURRENT = int(os.environ.get("MAX_CONCURRENT", "6"))
 EXTRA_ORIGINS = [
     o.strip().rstrip("/") for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()
 ]
+# 只把前端资源当静态文件服务。白名单而非黑名单：否则 server.py / README.md /
+# eval/dataset.json / tests/ 这些工程文件都能被直接下载（仓库是公开的，虽不算泄密，
+# 但以后新增的日志、导出数据会被自动暴露，且 /server.py 以 text/x-python 返回是现成指纹）
+STATIC_EXTENSIONS = {
+    ".html", ".css", ".js", ".svg", ".png", ".jpg", ".jpeg", ".ico", ".webp", ".woff2", ".map",
+}
 
 
 class RateLimiter:
@@ -441,6 +447,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if any(part.startswith(".") for part in target.relative_to(ROOT).parts):
             self._send_json(403, {"error": "forbidden"})
+            return
+        # 只服务前端资源：别的后缀（.py/.md/.json/.yaml…）直接当作不存在
+        if target.suffix.lower() not in STATIC_EXTENSIONS:
+            self._send_json(404, {"error": "not found"})
             return
         if target.is_dir():
             target = target / "index.html"

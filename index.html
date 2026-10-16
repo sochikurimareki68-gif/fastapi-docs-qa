@@ -785,7 +785,8 @@
       <span class="status-pill" id="statusPill"><i></i><span id="statusText">连接中…</span></span>
     </div>
 
-    <div class="stream" id="stream">
+    <!-- role=log + aria-live：流式回答是逐个 delta 插进来的，没有它屏幕阅读器不会读增量 -->
+    <div class="stream" id="stream" role="log" aria-live="polite" aria-relevant="additions text" aria-label="问答记录">
       <div class="stream-inner" id="streamInner">
         <section class="hero" id="hero">
           <div class="hero-mark">

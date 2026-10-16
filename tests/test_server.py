@@ -268,6 +268,40 @@ class TestHealthEndpoint(ServerTestCase):
         self.assertFalse(data["query_rewrite"]["enabled"])
 
 
+class TestStaticFiles(ServerTestCase):
+    """静态资源白名单：前端资源照常服务，工程文件一律当作「不存在」。
+
+    白名单而非黑名单的理由：黑名单只能挡住「已经想到的那几个文件」，而 server.py /
+    README.md / eval/dataset.json / tests/ 都会被当成静态资源吐出去（仓库虽公开，
+    但以后新增的日志、导出数据会被自动暴露，且 /server.py 以 text/x-python 返回是现成指纹）。
+    """
+
+    def fetch(self, path: str) -> str:
+        handler = make_handler()
+        handler.path = path
+        handler.do_GET()
+        return response_text(handler)
+
+    def test_root_serves_index(self) -> None:
+        text = self.fetch("/")
+        self.assertIn("200 OK", text)
+        self.assertIn("text/html", text)
+
+    def test_project_files_are_not_served(self) -> None:
+        for path in ("/server.py", "/README.md", "/eval/dataset.json",
+                     "/docs/rag-design.md", "/tests/test_server.py", "/render.yaml"):
+            with self.subTest(path=path):
+                text = self.fetch(path)
+                self.assertIn("404", text)
+                self.assertNotIn("def do_GET", text)      # 响应体里不能带出源码
+
+    def test_dotfiles_blocked(self) -> None:
+        self.assertIn("403", self.fetch("/.env"))
+
+    def test_traversal_blocked(self) -> None:
+        self.assertIn("403", self.fetch("/../etc/passwd"))
+
+
 class TestChatGate(ServerTestCase):
     """/api/chat 的前置检查：这些分支都在访问上游之前就返回，可以完全离线测。"""
 
