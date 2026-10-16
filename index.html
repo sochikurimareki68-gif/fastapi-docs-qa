@@ -784,7 +784,7 @@
           <h1>关于 FastAPI，你想知道什么？</h1>
           <p class="lead">
             这是一个基于检索增强生成（RAG）的文档问答助手。你的问题会先在
-            <b>50 篇 FastAPI 中文文档</b>中做向量检索，再由大模型严格依据检索结果作答，
+            <b>50 篇 FastAPI 中文文档</b>中做混合检索（向量语义 + 全文关键词），再由大模型严格依据检索结果作答，
             每一条回答都能在右侧看到它引用了哪些文档、相关度多高。
           </p>
           <div class="cards" id="heroCards"></div>
@@ -1273,10 +1273,13 @@
         ref.content.appendChild(p);
       }
       ref.content.classList.remove('streaming');
-      var badge = document.createElement('span');
-      badge.className = 'pill';
-      badge.textContent = '基于知识库';
-      ref.meta.appendChild(badge);
+      // 出错时不挂「基于知识库」徽章：那句提示恰恰说明这次没有正确答案可依据
+      if (!errored) {
+        var badge = document.createElement('span');
+        badge.className = 'pill';
+        badge.textContent = '基于知识库';
+        ref.meta.appendChild(badge);
+      }
       var el = document.createElement('span');
       el.textContent = getTime();
       ref.meta.insertBefore(el, ref.meta.firstChild.nextSibling || null);
