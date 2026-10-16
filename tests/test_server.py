@@ -10,7 +10,7 @@
   TestOriginCheck   来源校验：同源放行、无来源/异源/null 拒绝、额外白名单生效
   TestChatGate      /api/chat 前置检查：分块传输、非法 Content-Length、限流、并发满
   TestResetGate     /api/chat/reset 前置检查：与 /api/chat 同口径，且合法请求会读完 body
-  TestPumpStream    Dify 事件流 → 前端五类事件（meta/delta/refs/error/done）的翻译
+  TestPumpStream    Dify 事件流 → 前端六类事件（query/meta/delta/refs/error/done）的翻译
 
 为什么要这些测试：
     评测（eval/run_eval.py）跑的是**端到端效果**，需要真密钥、真网络、按分钟限流；

@@ -591,7 +591,8 @@ class Handler(BaseHTTPRequestHandler):
         # （判定与失败回退都在 query_rewrite 里，这里只负责记账与构造请求）
         query, rewrite_kind = query_rewrite.rewrite_query(message, ssl_context=SSL_CONTEXT)
         if rewrite_kind == "rewritten":
-            print(f"  ↻ 查询改写：{message} → {query}")
+            # flush=True：线上（Render）stdout 是块缓冲的，不刷就看不到这条日志
+            print(f"  ↻ 查询改写：{message} → {query}", flush=True)
 
         # Dify 对话型应用接口：首轮不传 conversation_id，之后由服务端自动带上
         body = {
@@ -787,7 +788,8 @@ class Handler(BaseHTTPRequestHandler):
         return fallback
 
     def log_message(self, fmt: str, *args) -> None:  # 精简访问日志
-        print(f"[{self.log_date_time_string()}] {fmt % args}")
+        # flush=True：stdout 块缓冲会让线上访问日志长时间不可见（同 query_rewrite 教训）
+        print(f"[{self.log_date_time_string()}] {fmt % args}", flush=True)
 
 
 def main() -> None:
