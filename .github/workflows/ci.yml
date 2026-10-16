@@ -22,8 +22,7 @@ jobs:
           python-version: "3.12"
 
       - name: 语法检查
-        run: |
-          python -m py_compile prepare_docs.py upload_docs.py server.py eval/run_eval.py tests/test_server.py
+        run: python -m compileall -q . && echo "compile ok"
 
       - name: 单元测试
         run: python -m unittest discover -s tests -v

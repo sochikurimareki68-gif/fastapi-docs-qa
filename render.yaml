@@ -19,5 +19,8 @@ services:
       # 密钥只填在 Render 控制台，不写进代码、不提交仓库
       - key: DIFY_API_KEY
         sync: false
+      # 查询改写用的 LLM 密钥（火山方舟）。不填也能跑：代码会自动跳过改写，问答不受影响
+      - key: REWRITE_API_KEY
+        sync: false
       - key: DIFY_BASE
         value: https://api.dify.ai/v1

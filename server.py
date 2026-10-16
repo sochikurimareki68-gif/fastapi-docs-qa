@@ -20,6 +20,7 @@ FastAPI 文档智能问答助手 · 轻量后端代理
                               下一轮 /api/chat 从首轮开始
 
 SSE 事件（与前端约定）：
+    query → {"query": "..."}             查询改写后的检索式，**仅在真的改写过时才推**
     meta  → {"conversation_id": "..."}   会话映射在服务端，前端可忽略
     delta → {"content": "增量文字"}      逐段下发的回答
     refs  → {"sources": [...]}           RAG 命中的引用来源（文档名/段落/得分）
@@ -33,7 +34,8 @@ SSE 事件（与前端约定）：
 然后浏览器打开 http://localhost:3000
 
 零第三方依赖，只用 Python 标准库。整体框架移植自电商客服项目（对接扣子），
-上游换成了 Dify 对话型应用（POST /chat-messages）。
+上游换成了 Dify 对话型应用（POST /chat-messages）。检索前还有一步「查询改写」：
+口语化提问先改写成带官方术语的检索式再送去检索（见 query_rewrite.py）。
 """
 
 from __future__ import annotations
@@ -51,6 +53,8 @@ from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
+
+import query_rewrite   # 本地模块：口语化提问 → 带官方术语的检索式（见 query_rewrite.py 文件头）
 
 ROOT = Path(__file__).resolve().parent
 
@@ -525,10 +529,16 @@ class Handler(BaseHTTPRequestHandler):
             f"Max-Age={SESSION_TTL}{secure}"
         )
 
+        # 检索前先做一次「口语提问 → 术语检索式」改写：命中率提升的主要来源
+        # （判定与失败回退都在 query_rewrite 里，这里只负责记账与构造请求）
+        query, rewrite_kind = query_rewrite.rewrite_query(message, ssl_context=SSL_CONTEXT)
+        if rewrite_kind == "rewritten":
+            print(f"  ↻ 查询改写：{message} → {query}")
+
         # Dify 对话型应用接口：首轮不传 conversation_id，之后由服务端自动带上
         body = {
             "inputs": {},
-            "query": message,
+            "query": query,
             "response_mode": "streaming",   # 流式返回，前端可以逐字显示
             "user": user_id,
         }
@@ -575,7 +585,8 @@ class Handler(BaseHTTPRequestHandler):
 
         self._sse_start()
         try:
-            self._pump_stream(resp, token)
+            # 改写生效时把检索式一并下发，前端显示在问题下方；没改写就不推（避免重复一遍原问题）
+            self._pump_stream(resp, token, query if rewrite_kind == "rewritten" else "")
         except (BrokenPipeError, ConnectionResetError):
             pass  # 用户中途关掉页面，正常情况
         finally:
@@ -609,15 +620,21 @@ class Handler(BaseHTTPRequestHandler):
         SESSIONS.clear_conversation(self._read_cookie(SESSION_COOKIE))
         self._send_json(200, {"ok": True})
 
-    def _pump_stream(self, resp, token: str) -> None:
-        """把 Dify 的 SSE 事件翻译成前端约定的五类事件：meta / delta / refs / error / done。
+    def _pump_stream(self, resp, token: str, retrieval_query: str = "") -> None:
+        """把 Dify 的 SSE 事件翻译成前端约定的六类事件：query / meta / delta / refs / error / done。
 
         Dify 与扣子的流格式不同：只有 data: 行，事件类型在 JSON 的 event 字段里
         （message / message_end / error / workflow_started 等）。
+
+        retrieval_query 非空时，会最先推一条 query 事件 —— 前端据此把「口语提问被改写成
+        什么检索式」显示在问题下方（查询改写见 query_rewrite.py）。
         """
         conversation_id = ""
         sent_meta = False
         sources: list[dict] = []
+
+        if retrieval_query:
+            self._sse_send("query", json.dumps({"query": retrieval_query}, ensure_ascii=False))
 
         for raw in resp:
             line = raw.decode("utf-8", "replace").rstrip("\r\n")

@@ -369,6 +369,25 @@ class TestPumpStream(ServerTestCase):
         # conversation_id 落到服务端会话上，下一轮由服务端自动带上
         self.assertEqual(server.SESSIONS.resolve(self.token)[2], "conv-1")
 
+    def test_retrieval_query_event_comes_first(self) -> None:
+        """查询改写生效时，最先推一条 query 事件，前端据此把检索式显示在问题下方。"""
+        handler = make_handler()
+        handler._pump_stream(
+            sse_stream({"event": "message", "answer": "好", "conversation_id": "conv-1"}),
+            self.token,
+            "如何用 APIRouter 把路由拆分到多个文件？",
+        )
+        raw = response_text(handler)
+        self.assertIn("event: query", raw)
+        self.assertLess(raw.index("event: query"), raw.index("event: delta"))
+        payload = json.loads(raw.split("event: query\ndata: ")[1].split("\n")[0])
+        self.assertEqual(payload, {"query": "如何用 APIRouter 把路由拆分到多个文件？"})
+
+    def test_no_query_event_without_rewrite(self) -> None:
+        """没改写（或改写被关闭）时不推 query 事件，免得把原问题重复显示一遍。"""
+        raw = self.pump({"event": "message", "answer": "好", "conversation_id": "conv-1"})
+        self.assertNotIn("event: query", raw)
+
     def test_upstream_error_is_forwarded_and_stream_ends(self) -> None:
         raw = self.pump(
             {"event": "message", "answer": "半句", "conversation_id": "conv-9"},

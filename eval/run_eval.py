@@ -379,7 +379,7 @@ def main() -> int:
     s = summarize(results)
     meta = {
         "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "model": "DeepSeek V4.1 Flash（Dify 平台）+ bge-m3 混合检索（召回池 Top-K 20 / 返回 Top-K 10）+ Rerank（bge-reranker-v2-m3）",
+        "model": "DeepSeek V4.1 Flash（Dify 平台）+ bge-m3 混合检索（召回池 Top-K 20 / 返回 Top-K 10）+ Rerank（bge-reranker-v2-m3）+ 查询改写（火山方舟 glm-5-3-flash，检索前把口语提问改写成术语检索式）",
         "base": args.base,
         "kb": "FastAPI 官方中文文档 50 篇 · 知识库检索问答",
     }

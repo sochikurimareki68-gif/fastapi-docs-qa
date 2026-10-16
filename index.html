@@ -364,6 +364,19 @@
     margin-bottom: 4px;
   }
   .q .q-text { font-size: 14.5px; line-height: 1.6; font-weight: 500; word-break: break-word; }
+  /* 查询改写：把「口语提问 → 术语检索式」这一步显式展示出来，一眼可见改写是否生效 */
+  .q .q-rewrite {
+    margin-top: 8px;
+    padding: 6px 10px;
+    border-left: 2px solid var(--accent);
+    background: var(--accent-soft);
+    border-radius: 0 8px 8px 0;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--ink-2);
+    word-break: break-word;
+  }
+  .q .q-rewrite b { color: var(--accent); font-weight: 600; }
 
   .a { margin-top: 16px; display: flex; gap: 12px; }
   .a-avatar {
@@ -1052,8 +1065,13 @@
     var qText = document.createElement('div');
     qText.className = 'q-text';
     qText.textContent = question;   // 用户输入一律走文本节点
+    // 检索式：只有服务端真的做了查询改写才会显示（事件到达前保持隐藏）
+    var rewrite = document.createElement('div');
+    rewrite.className = 'q-rewrite';
+    rewrite.hidden = true;
     q.appendChild(label);
     q.appendChild(qText);
+    q.appendChild(rewrite);
 
     var a = document.createElement('div');
     a.className = 'a';
@@ -1077,7 +1095,7 @@
     turn.appendChild(q);
     turn.appendChild(a);
     streamInner.appendChild(turn);
-    return { turn: turn, content: content, meta: meta };
+    return { turn: turn, content: content, meta: meta, rewrite: rewrite };
   }
 
   function showTyping(content) {
@@ -1250,6 +1268,19 @@
               if (piece) { answer += piece; paint(); }
             } else if (ev === 'refs') {
               try { setSources(JSON.parse(dataLine).sources || []); } catch (e) {}
+            } else if (ev === 'query') {
+              // 查询改写生效时，服务端最先推这条：把「口语提问 → 术语检索式」亮出来
+              var retrievalQuery = '';
+              try { retrievalQuery = JSON.parse(dataLine).query || ''; } catch (e) { retrievalQuery = ''; }
+              if (retrievalQuery) {
+                var tag = document.createElement('b');
+                tag.textContent = '检索式';
+                ref.rewrite.textContent = '';
+                ref.rewrite.appendChild(tag);
+                ref.rewrite.appendChild(document.createTextNode('：' + retrievalQuery));  // 文本节点，避免 XSS
+                ref.rewrite.hidden = false;
+                if (isNearBottom()) scrollToBottom(false);
+              }
             } else if (ev === 'error') {
               var msg = '知识库暂时无法回答，请稍后再试。';
               try { msg = JSON.parse(dataLine).message || msg; } catch (e) {}
