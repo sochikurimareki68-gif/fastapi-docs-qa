@@ -20,7 +20,9 @@ FastAPI 文档智能问答助手 · 轻量后端代理
                               下一轮 /api/chat 从首轮开始
 
 SSE 事件（与前端约定）：
-    query → {"query": "..."}             查询改写后的检索式，**仅在真的改写过时才推**
+    query → {"query": "...", "kind": "..."} 查询改写的结果，最先下发；
+                                          kind = rewritten / unchanged / fallback / no-key / off，
+                                          前端只在 rewritten 时显示「检索式：…」
     meta  → {"conversation_id": "..."}   会话映射在服务端，前端可忽略
     delta → {"content": "增量文字"}      逐段下发的回答
     refs  → {"sources": [...]}           RAG 命中的引用来源（文档名/段落/得分）
@@ -592,8 +594,8 @@ class Handler(BaseHTTPRequestHandler):
 
         self._sse_start()
         try:
-            # 改写生效时把检索式一并下发，前端显示在问题下方；没改写就不推（避免重复一遍原问题）
-            self._pump_stream(resp, token, query if rewrite_kind == "rewritten" else "")
+            # 一律把「改写结果 + 检索式」下发（前端只在改写成功时显示检索式）
+            self._pump_stream(resp, token, query, rewrite_kind)
         except (BrokenPipeError, ConnectionResetError):
             pass  # 用户中途关掉页面，正常情况
         finally:
@@ -627,21 +629,23 @@ class Handler(BaseHTTPRequestHandler):
         SESSIONS.clear_conversation(self._read_cookie(SESSION_COOKIE))
         self._send_json(200, {"ok": True})
 
-    def _pump_stream(self, resp, token: str, retrieval_query: str = "") -> None:
+    def _pump_stream(self, resp, token: str, retrieval_query: str = "", rewrite_kind: str = "") -> None:
         """把 Dify 的 SSE 事件翻译成前端约定的六类事件：query / meta / delta / refs / error / done。
 
         Dify 与扣子的流格式不同：只有 data: 行，事件类型在 JSON 的 event 字段里
         （message / message_end / error / workflow_started 等）。
 
-        retrieval_query 非空时，会最先推一条 query 事件 —— 前端据此把「口语提问被改写成
-        什么检索式」显示在问题下方（查询改写见 query_rewrite.py）。
+        最先推的 query 事件带两个字段：`kind` 是改写结果（rewritten / unchanged / fallback /
+        no-key / off），`query` 是实际送去检索的语句。前端只在 kind=rewritten 时显示检索式；
+        其余标记留着排查用 —— 线上出问题时，一眼就能看出是「没配密钥」还是「调用失败」。
         """
         conversation_id = ""
         sent_meta = False
         sources: list[dict] = []
 
-        if retrieval_query:
-            self._sse_send("query", json.dumps({"query": retrieval_query}, ensure_ascii=False))
+        if rewrite_kind:
+            self._sse_send("query", json.dumps(
+                {"query": retrieval_query, "kind": rewrite_kind}, ensure_ascii=False))
 
         for raw in resp:
             line = raw.decode("utf-8", "replace").rstrip("\r\n")

@@ -406,21 +406,34 @@ class TestPumpStream(ServerTestCase):
         self.assertEqual(server.SESSIONS.resolve(self.token)[2], "conv-1")
 
     def test_retrieval_query_event_comes_first(self) -> None:
-        """查询改写生效时，最先推一条 query 事件，前端据此把检索式显示在问题下方。"""
+        """查询改写生效时，最先推一条 query 事件（带 kind），前端据此显示检索式。"""
         handler = make_handler()
         handler._pump_stream(
             sse_stream({"event": "message", "answer": "好", "conversation_id": "conv-1"}),
             self.token,
             "如何用 APIRouter 把路由拆分到多个文件？",
+            "rewritten",
         )
         raw = response_text(handler)
         self.assertIn("event: query", raw)
         self.assertLess(raw.index("event: query"), raw.index("event: delta"))
         payload = json.loads(raw.split("event: query\ndata: ")[1].split("\n")[0])
-        self.assertEqual(payload, {"query": "如何用 APIRouter 把路由拆分到多个文件？"})
+        self.assertEqual(payload, {"query": "如何用 APIRouter 把路由拆分到多个文件？", "kind": "rewritten"})
 
-    def test_no_query_event_without_rewrite(self) -> None:
-        """没改写（或改写被关闭）时不推 query 事件，免得把原问题重复显示一遍。"""
+    def test_query_event_reports_failure_kind(self) -> None:
+        """改写失败也要上报 kind —— 线上排查时一眼能看出是「没配密钥」还是「调用失败」。"""
+        handler = make_handler()
+        handler._pump_stream(
+            sse_stream({"event": "message", "answer": "好", "conversation_id": "conv-1"}),
+            self.token,
+            "项目变大之后怎么用多个文件来组织路由？",
+            "fallback",
+        )
+        raw = response_text(handler)
+        payload = json.loads(raw.split("event: query\ndata: ")[1].split("\n")[0])
+        self.assertEqual(payload["kind"], "fallback")
+
+    def test_no_query_event_without_kind(self) -> None:
         raw = self.pump({"event": "message", "answer": "好", "conversation_id": "conv-1"})
         self.assertNotIn("event: query", raw)
 

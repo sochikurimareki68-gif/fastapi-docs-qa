@@ -54,7 +54,9 @@ def _call_upstream(message: str, api_key: str, ssl_context) -> str:
     """调用 OpenAI 兼容的 chat/completions 接口做改写，返回模型原始输出。"""
     base = os.environ.get("REWRITE_BASE", "https://ark.cn-beijing.volces.com/api/v3").rstrip("/")
     model = os.environ.get("REWRITE_MODEL", "glm-5-3-flash-260828").strip()
-    timeout = float(os.environ.get("REWRITE_TIMEOUT", "10"))
+    # 免费实例 CPU 被限流时，一次改写可能比本地慢好几倍（本地实测 2~6 秒），
+    # 所以默认给到 20 秒；宁可偶尔多等，也不要动不动就放弃改写（见 REWRITE_TIMEOUT）
+    timeout = float(os.environ.get("REWRITE_TIMEOUT", "20"))
 
     payload = {
         "model": model,
@@ -121,7 +123,8 @@ def rewrite_query(message: str, ssl_context=None) -> tuple[str, str]:
     try:
         raw = _call_upstream(message, api_key, ssl_context)
     except (urllib.error.URLError, OSError, ValueError, KeyError) as exc:
-        print(f"  ⚠️ 查询改写失败，改用原问题：{exc}")
+        # flush=True：线上（Render）stdout 是块缓冲的，不刷就看不到这条日志，排查会瞎
+        print(f"  ⚠️ 查询改写失败，改用原问题：{exc}", flush=True)
         return message, "fallback"
 
     cleaned = _clean(raw)
@@ -129,6 +132,6 @@ def rewrite_query(message: str, ssl_context=None) -> tuple[str, str]:
         return message, "unchanged"      # 模型按规则 4 判定无需改写
     # 空输出、或改写得比原问题长好几倍（模型开始自问自答）→ 不采信
     if not cleaned or len(cleaned) > max(MAX_QUERY_CHARS, len(message) * 3):
-        print(f"  ⚠️ 查询改写输出不可用，改用原问题：{cleaned[:60]!r}")
+        print(f"  ⚠️ 查询改写输出不可用，改用原问题：{cleaned[:60]!r}", flush=True)
         return message, "fallback"
     return cleaned, "rewritten"

@@ -1269,15 +1269,15 @@
             } else if (ev === 'refs') {
               try { setSources(JSON.parse(dataLine).sources || []); } catch (e) {}
             } else if (ev === 'query') {
-              // 查询改写生效时，服务端最先推这条：把「口语提问 → 术语检索式」亮出来
-              var retrievalQuery = '';
-              try { retrievalQuery = JSON.parse(dataLine).query || ''; } catch (e) { retrievalQuery = ''; }
-              if (retrievalQuery) {
+              // 服务端最先推这条：kind 是改写结果，只有 rewritten 时才把检索式显示出来
+              var info = {};
+              try { info = JSON.parse(dataLine) || {}; } catch (e) { info = {}; }
+              if (info.kind === 'rewritten' && info.query) {
                 var tag = document.createElement('b');
                 tag.textContent = '检索式';
                 ref.rewrite.textContent = '';
                 ref.rewrite.appendChild(tag);
-                ref.rewrite.appendChild(document.createTextNode('：' + retrievalQuery));  // 文本节点，避免 XSS
+                ref.rewrite.appendChild(document.createTextNode('：' + info.query));  // 文本节点，避免 XSS
                 ref.rewrite.hidden = false;
                 if (isNearBottom()) scrollToBottom(false);
               }
