@@ -83,6 +83,21 @@ def _clean(raw: str) -> str:
     return re.sub(r"^(改写后|改写结果|检索式|问题|答案)\s*[:：]\s*", "", text).strip()
 
 
+def is_enabled() -> bool:
+    """改写开关是否打开（`QUERY_REWRITE=off` 关掉）。"""
+    return os.environ.get("QUERY_REWRITE", "on").strip().lower() not in {"off", "0", "false", "no"}
+
+
+def is_configured() -> bool:
+    """是否配好了改写用的密钥 —— 没配就静默跳过改写（问答不受影响）。"""
+    return bool(os.environ.get("REWRITE_API_KEY", "").strip())
+
+
+def model_name() -> str:
+    """改写用的模型名（给 /api/health 展示用，不是密钥）。"""
+    return os.environ.get("REWRITE_MODEL", "glm-5-3-flash-260828").strip()
+
+
 def rewrite_query(message: str, ssl_context=None) -> tuple[str, str]:
     """把提问改写成检索式。
 
@@ -94,7 +109,7 @@ def rewrite_query(message: str, ssl_context=None) -> tuple[str, str]:
         rewritten —— 改写成功
         fallback  —— 调用失败或输出不可用，已回退到原问题
     """
-    if os.environ.get("QUERY_REWRITE", "on").strip().lower() in {"off", "0", "false", "no"}:
+    if not is_enabled():
         return message, "off"
     if not _HAS_WORDS_RE.search(message):
         return message, "empty"

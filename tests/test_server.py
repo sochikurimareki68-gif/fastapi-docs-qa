@@ -28,6 +28,7 @@ import sys
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -230,6 +231,41 @@ class TestOriginCheck(ServerTestCase):
     def test_extra_origins_whitelist(self) -> None:
         server.EXTRA_ORIGINS = ["https://front.example.com"]
         self.assertTrue(self.check(Host="demo.example.com", Origin="https://front.example.com"))
+
+
+class TestHealthEndpoint(ServerTestCase):
+    """/api/health 要能一眼看出「查询改写是否就绪」，省得去控制台翻被掩码挡住的变量。"""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._api_key = server.DIFY_API_KEY
+        server.DIFY_API_KEY = "app-test"
+
+    def tearDown(self) -> None:
+        server.DIFY_API_KEY = self._api_key
+        super().tearDown()
+
+    def health(self) -> dict:
+        handler = make_handler()
+        handler.path = "/api/health"
+        handler.do_GET()
+        return json.loads(response_text(handler).split("\r\n\r\n", 1)[1])
+
+    def test_reports_not_ready_without_key(self) -> None:
+        with mock.patch.dict("os.environ", {"REWRITE_API_KEY": "", "QUERY_REWRITE": "on"}):
+            data = self.health()
+        self.assertTrue(data["ok"])
+        self.assertTrue(data["api_key_ready"])
+        self.assertEqual(
+            data["query_rewrite"],
+            {"enabled": True, "key_ready": False, "model": "glm-5-3-flash-260828"},
+        )
+
+    def test_reports_ready_with_key_and_switch(self) -> None:
+        with mock.patch.dict("os.environ", {"REWRITE_API_KEY": "ark-test", "QUERY_REWRITE": "off"}):
+            data = self.health()
+        self.assertTrue(data["query_rewrite"]["key_ready"])
+        self.assertFalse(data["query_rewrite"]["enabled"])
 
 
 class TestChatGate(ServerTestCase):

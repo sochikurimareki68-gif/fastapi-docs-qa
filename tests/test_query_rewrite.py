@@ -39,6 +39,29 @@ class TestClean(unittest.TestCase):
         self.assertEqual(query_rewrite._clean("   "), "")
 
 
+class TestConfigHelpers(unittest.TestCase):
+    """开关 / 密钥 / 模型名的判定，/api/health 就是靠它们汇报状态的。"""
+
+    def test_enabled_by_default(self) -> None:
+        with mock.patch.dict("os.environ", {}, clear=True):
+            self.assertTrue(query_rewrite.is_enabled())
+
+    def test_disabled_by_switch(self) -> None:
+        for value in ("off", "OFF", "0", "false", "no"):
+            with mock.patch.dict("os.environ", {"QUERY_REWRITE": value}):
+                self.assertFalse(query_rewrite.is_enabled(), value)
+
+    def test_configured_requires_non_empty_key(self) -> None:
+        with mock.patch.dict("os.environ", {"REWRITE_API_KEY": "  "}):
+            self.assertFalse(query_rewrite.is_configured())
+        with mock.patch.dict("os.environ", {"REWRITE_API_KEY": "ark-test"}):
+            self.assertTrue(query_rewrite.is_configured())
+
+    def test_model_name_default(self) -> None:
+        with mock.patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(query_rewrite.model_name(), "glm-5-3-flash-260828")
+
+
 class RewriteTestCase(unittest.TestCase):
     """公共基类：把环境变量固定成「开了开关、配了密钥」的常态。"""
 

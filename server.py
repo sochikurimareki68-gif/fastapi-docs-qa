@@ -404,6 +404,13 @@ class Handler(BaseHTTPRequestHandler):
                 "ok": True,
                 "api_base": DIFY_BASE,
                 "api_key_ready": bool(DIFY_API_KEY),
+                # 查询改写是可选能力（没配密钥会自动跳过）。把它是否就绪一并暴露出来 ——
+                # 否则「线上到底有没有配上改写密钥」只能去控制台翻，还会被掩码挡住。
+                "query_rewrite": {
+                    "enabled": query_rewrite.is_enabled(),
+                    "key_ready": query_rewrite.is_configured(),
+                    "model": query_rewrite.model_name(),
+                },
             })
             return
         self._serve_static(path)
