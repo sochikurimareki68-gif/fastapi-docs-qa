@@ -30,11 +30,13 @@
     python3 eval/run_eval.py --limit 4                 # 只跑前 4 条，快速验证
     python3 eval/run_eval.py --base http://localhost:3000
     python3 eval/run_eval.py --delay 0                 # 本地无宿主机限流时可全速
+    python3 eval/run_eval.py --out /tmp/try.md         # 指定报告写到哪
 
 注意：代理有访问保护（单 IP 每分钟 6 次 / 每天 60 次），因此默认串行并每 11 秒发一条，
       跑满 28 条约需 6 分钟。用 --delay 覆盖间隔。
 
-输出：eval/report.md（同时打印终端摘要）
+输出：全量跑写 eval/report.md；抽样跑（--limit）默认写 eval/report.partial.md，
+      免得一次快速验证就把交付用的全量报告覆盖掉（本仓库踩过这个坑）。用 --out 可指定路径。
 """
 
 from __future__ import annotations
@@ -53,11 +55,26 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DATASET = ROOT / "eval" / "dataset.json"
 REPORT = ROOT / "eval" / "report.md"
+# 抽样运行的默认输出：不碰交付用的全量报告
+PARTIAL_REPORT = ROOT / "eval" / "report.partial.md"
 
 REQUEST_TIMEOUT = 120        # 单次请求最长等待（秒）
 RETRY = 2                    # 失败重试次数
 STRICT_CITE_SCORE = 0.5      # 「严格口径」门槛：命中文档 且 top-1 得分达该值才算严格命中
 REFUSE_SCORE = 0.1           # 库外问题：top-1 得分低于该值视为检索未命中
+
+
+def resolve_report_path(out: str | None, limit: int) -> Path:
+    """决定这次报告写到哪个文件。
+
+    - 显式给了 --out：就写那里；
+    - 抽样跑（--limit）：写 eval/report.partial.md —— 否则一次「--limit 4 快速验证」
+      会把交付用的全量报告覆盖成 4 条版本（本仓库真踩过：28 条的完整报告被覆盖，只能重跑）；
+    - 全量跑：写 eval/report.md。
+    """
+    if out:
+        return Path(out)
+    return PARTIAL_REPORT if limit else REPORT
 
 
 def build_ssl_context() -> ssl.SSLContext:
@@ -263,7 +280,7 @@ def summarize(results: list[dict]) -> dict:
     }
 
 
-def write_report(meta: dict, s: dict, results: list[dict]) -> None:
+def write_report(meta: dict, s: dict, results: list[dict], report_path: Path) -> None:
     lines: list[str] = []
     a = lines.append
 
@@ -272,6 +289,9 @@ def write_report(meta: dict, s: dict, results: list[dict]) -> None:
     a(f"> 生成时间：{meta['time']}　|　生成模型：{meta['model']}　|　接口：`{meta['base']}`")
     a(f"> 知识库：{meta['kb']}")
     a(f"> 用例总数：{s['total']}（库内 {s['answer_total']} / 越界 {s['refuse_total']}）　|　成功返回：{s['succeeded']}　|　失败：{s['failed']}")
+    if meta.get("partial_note"):
+        a("")
+        a(meta["partial_note"])
     a("")
 
     a("## 一、总体指标")
@@ -341,7 +361,7 @@ def write_report(meta: dict, s: dict, results: list[dict]) -> None:
     a("```")
     a("")
 
-    REPORT.write_text("\n".join(lines), encoding="utf-8")
+    report_path.write_text("\n".join(lines), encoding="utf-8")
 
 
 def main() -> int:
@@ -349,6 +369,10 @@ def main() -> int:
     parser.add_argument("--base", default="https://fastapi-docs-qa.onrender.com", help="代理服务地址")
     parser.add_argument("--limit", type=int, default=0, help="只跑前 N 条用例")
     parser.add_argument("--delay", type=float, default=11.0, help="每条之间的间隔秒数（默认 11，避开每分钟 6 次限流）")
+    parser.add_argument(
+        "--out",
+        help="报告输出路径（默认：全量跑写 eval/report.md，抽样跑写 eval/report.partial.md）",
+    )
     args = parser.parse_args()
 
     data = json.loads(DATASET.read_text(encoding="utf-8"))
@@ -377,13 +401,19 @@ def main() -> int:
         print(f"  [{i + 1:>2}/{len(cases)}] {flag} {r['id']:<4} {r['module']:<10} {r['elapsed']:>5.1f}s  {detail}")
 
     s = summarize(results)
+    report_path = resolve_report_path(args.out, args.limit)
     meta = {
         "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "model": "DeepSeek V4.1 Flash（Dify 平台）+ bge-m3 混合检索（召回池 Top-K 20 / 返回 Top-K 10）+ Rerank（bge-reranker-v2-m3）+ 查询改写（火山方舟 glm-5-3-flash，检索前把口语提问改写成术语检索式）",
         "base": args.base,
         "kb": "FastAPI 官方中文文档 50 篇 · 知识库检索问答",
+        "partial_note": (
+            f"> ⚠️ **本次是抽样运行**：只跑了前 {len(cases)} 条用例，指标不代表全量；"
+            f"交付用的全量报告在 `eval/report.md`。"
+            if args.limit else ""
+        ),
     }
-    write_report(meta, s, results)
+    write_report(meta, s, results, report_path)
 
     print("─" * 66)
     print(f"答案准确率 : {s['answer_pct']}  ({s['answer_ok']}/{s['answer_total']})")
@@ -392,7 +422,9 @@ def main() -> int:
     print(f"越界拒答率 : {s['refuse_pct']}  ({s['refuse_ok']}/{s['refuse_total']})")
     print(f"引用相关度 : {s['score_avg']} (top-1 均值)")
     print(f"平均延迟   : {s['latency_avg']}s   (P95 {s['latency_p95']}s)")
-    print(f"报告已写入 : {REPORT}")
+    print(f"报告已写入 : {report_path}")
+    if report_path != REPORT:
+        print(f"（全量报告 {REPORT.name} 未被改动；确实要覆盖它就显式 --out {REPORT}）")
     return 0
 
 

@@ -47,7 +47,7 @@ SSE 流式回答 + metadata.retriever_resources（引用片段）
 | `eval/dataset.json` | 效果评测用例集：28 条（库内 24 条覆盖路由 / 参数校验 / 请求体 / 表单文件 / 头部 Cookie / 依赖注入 / 安全认证 / 中间件 / 后台任务 / 响应模型 / 错误处理 / 项目结构 / 数据库，越界 4 条含闲聊与相近技术） |
 | `eval/run_eval.py` | 评测脚本（零依赖）：逐条调用线上 `/api/chat`，解析 SSE 的回复与引用来源，产出答案准确率 / 引用命中率 / 越界拒答率 / 相关度 / 延迟 |
 | `eval/report.md` | 评测报告（脚本生成）：总体指标、逐条结果、验收结论、方法与局限 |
-| `tests/` | 后端单元测试（`unittest`，零依赖、离线毫秒级）：限流三段配额与窗口清理、会话 TTL 与容量上限、来源校验、`/api/chat` 前置拒绝分支、Dify 事件流翻译、查询改写的全部回退分支 |
+| `tests/` | 后端单元测试（`unittest`，零依赖、离线毫秒级）：限流三段配额与窗口清理、会话 TTL 与容量上限、来源校验、`/api/chat` 前置拒绝分支、Dify 事件流翻译、查询改写的全部回退分支、评测报告输出路径（抽样跑不得覆盖全量报告） |
 | `.github/workflows/ci.yml` | CI：每次 push / PR 跑语法检查 + 单元测试（评测需真密钥与公网，不进 CI） |
 | `docs/rag-design.md` | 设计文档：语料清洗与索引配置、检索策略、Prompt 逐条意图、引用来源三层处理、访问防护与会话设计、评测发现与优化方向 |
 
@@ -144,8 +144,10 @@ python3 server.py
 复现：
 
 ```bash
-python3 eval/run_eval.py                       # 默认打线上 Demo
+python3 eval/run_eval.py                       # 默认打线上 Demo，写 eval/report.md
 python3 eval/run_eval.py --base http://localhost:3000 --delay 0   # 本地全速
+python3 eval/run_eval.py --limit 4             # 抽样快速验证，写 eval/report.partial.md（不动全量报告）
+python3 eval/run_eval.py --out /tmp/try.md     # 也可以自己指定报告路径
 ```
 
 ## 路线图

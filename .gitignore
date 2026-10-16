@@ -5,6 +5,9 @@ docs-source/
 # 环境变量与密钥（Dify API Key 等）
 .env
 
+# 评测的抽样报告：--limit 跑的临时产物，交付用的是 eval/report.md
+eval/report.partial.md
+
 # Python
 __pycache__/
 *.py[cod]
