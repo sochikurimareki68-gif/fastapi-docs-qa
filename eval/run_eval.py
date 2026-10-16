@@ -10,6 +10,8 @@
   2. 引用命中率   —— 库内问题：是否返回了引用来源，且命中 expect_docs 中的文档（Hit Rate@K，文档级召回）
   3. 引用相关度   —— 库内问题：top-1 引用片段的检索得分（Rerank 重排序得分，越高越准）
   4. 越界拒答率   —— 库外问题：是否明确拒答（而非编造答案）
+  5. 答案可溯源率 —— 回答里模型标成代码的 API 实体，能否在引用片段正文里找到出处
+                    （回答「这段回答本身有没有依据」，抓「引对文档却编了 API 名」）
   另附：严格口径命中率（top-1 得分 ≥ 0.5）与平均 / P95 / 最长 响应延迟
 
 为什么这样设计？
@@ -43,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import statistics
 import ssl
 import sys
@@ -175,6 +178,59 @@ def top_score(sources: list[dict]) -> float:
         return 0.0
 
 
+# ---------------------------------------------------------------------------
+# 可溯源性：回答里的 API 实体，能不能在引用片段里找到出处
+#
+# 「引用命中率」只回答「有没有找对资料」，「引用相关度」只回答「资料找得准不准」，
+# 两者都回答不了「这段回答本身有没有依据」—— 模型完全可能引对了文档、却顺手编一个
+# 文档里根本没有的参数名（RAG 里最典型的失败模式）。所以再加一层核对：把回答里
+# **模型自己标成代码**的标识符抽出来，逐个到引用片段正文里找出处，找不到的记进清单。
+# ---------------------------------------------------------------------------
+CODE_FENCE_RE = re.compile(r"```[a-zA-Z0-9_+-]*\n([\s\S]*?)```")
+INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
+IDENT_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]{2,}\b")
+# 代码块里必然出现、但不构成「API 断言」的词：统计进去只会稀释指标
+ENTITY_STOPWORDS = {
+    "def", "return", "async", "await", "import", "from", "class", "self",
+    "if", "else", "elif", "for", "while", "try", "except", "raise", "with",
+    "in", "is", "not", "and", "or", "none", "true", "false", "str", "int",
+    "float", "bool", "dict", "list", "tuple", "set", "print", "python",
+}
+
+
+def answer_entities(answer: str) -> set[str]:
+    """抽出回答里「需要核对出处」的 API 实体。
+
+    只认两类：
+      1. 模型自己标成代码的内容（行内 `` `code` `` 与 ```代码块```）里的标识符 ——
+         这是模型在明确断言「这里有一个 API / 参数 / 文件」；
+      2. 正文里带下划线的标识符（`include_router`、`response_model` 这种）。
+    正文里的普通词（「代码」「示例」「接口」…）不算：统计进去全是噪声，指标就没人看了。
+    """
+    code_text = "\n".join(CODE_FENCE_RE.findall(answer)) + "\n" + "\n".join(INLINE_CODE_RE.findall(answer))
+    prose = INLINE_CODE_RE.sub(" ", CODE_FENCE_RE.sub(" ", answer))
+
+    entities = set(IDENT_RE.findall(code_text))
+    entities |= {token for token in IDENT_RE.findall(prose) if "_" in token}
+    return {e for e in entities if e.lower() not in ENTITY_STOPWORDS}
+
+
+def traceability(answer: str, sources: list[dict]) -> dict:
+    """核对实体有没有出处。
+
+    比对用「不区分大小写」的包含匹配 —— 宁可少报缺口，也不冤枉模型：这类指标一旦
+    误报成堆，就不会有人再看了。返回实体总数、有出处的数量，以及无出处的实体清单。
+    """
+    haystack = "\n".join((s.get("content") or "") for s in sources).lower()
+    entities = sorted(answer_entities(answer))
+    unsupported = [e for e in entities if e.lower() not in haystack]
+    return {
+        "entity_total": len(entities),
+        "entity_supported": len(entities) - len(unsupported),
+        "unsupported_entities": unsupported,
+    }
+
+
 def run_case(case: dict, base_url: str) -> dict:
     """跑单条用例并打分。"""
     ok, answer, sources, elapsed, err = False, "", [], 0.0, ""
@@ -203,12 +259,17 @@ def run_case(case: dict, base_url: str) -> dict:
         "docs": docs,
         "passed": False,
         "note": "",
+        # 可溯源性：默认 0（越界/失败用例不做核对）
+        "entity_total": 0,
+        "entity_supported": 0,
+        "unsupported_entities": [],
     }
 
     if not ok:
         return result
 
     if mode == "answer":
+        result.update(traceability(answer, sources))   # 答案里的 API 实体有没有出处
         keyword_hit = any(kw in answer for kw in case.get("expect_any", []))
         # 引用命中（文档级召回）：有引用片段，且命中 expect_docs 中任一文档（未给 expect_docs 时只要求有引用）
         expect_docs = case.get("expect_docs") or []
@@ -257,6 +318,11 @@ def summarize(results: list[dict]) -> dict:
     refuse_ok = sum(1 for r in ref if r.get("passed"))
     scores = [r["top_score"] for r in ans if r.get("sources")]
 
+    # 可溯源性：按「实体」而不是按「用例」统计（一条回答里可能核对了十几个 API 名）
+    trace_cases = [r for r in ans if r.get("entity_total")]
+    entity_total = sum(r.get("entity_total", 0) for r in ans)
+    entity_supported = sum(r.get("entity_supported", 0) for r in ans)
+
     return {
         "total": total,
         "succeeded": len(succeeded),
@@ -271,6 +337,12 @@ def summarize(results: list[dict]) -> dict:
         "citation_pct": rate(cite_ok, len(ans)),
         "citation_strict_pct": rate(cite_strict_ok, len(ans)),
         "refuse_pct": rate(refuse_ok, len(ref)),
+        "trace_pct": rate(entity_supported, entity_total),
+        "trace_cases": len(trace_cases),
+        "entity_total": entity_total,
+        "entity_supported": entity_supported,
+        # 有缺口的用例：(用例 id, 找不到出处的实体)
+        "trace_gaps": [(r["id"], r["unsupported_entities"]) for r in ans if r.get("unsupported_entities")],
         "score_avg": round(statistics.mean(scores), 2) if scores else 0,
         "score_min": round(min(scores), 2) if scores else 0,
         "score_max": round(max(scores), 2) if scores else 0,
@@ -302,14 +374,15 @@ def write_report(meta: dict, s: dict, results: list[dict], report_path: Path) ->
     a(f"| **引用命中率**（文档级召回） | **{s['citation_pct']}**（{s['citation_ok']}/{s['answer_total']}） | 库内问题：返回引用且命中 expect_docs 中任一文档（Hit Rate@K） |")
     a(f"| └ 严格口径（附加参考） | {s['citation_strict_pct']}（{s['citation_strict_ok']}/{s['answer_total']}） | 在文档级命中基础上，再要求 top-1 得分 ≥ {STRICT_CITE_SCORE} |")
     a(f"| **越界拒答率** | **{s['refuse_pct']}**（{s['refuse_ok']}/{s['refuse_total']}） | 库外问题：明确拒答而非编造 |")
+    a(f"| **答案可溯源率** | **{s['trace_pct']}**（{s['entity_supported']}/{s['entity_total']}） | 回答里模型标成代码的 API 实体，能在引用片段正文里找到出处的比例（{s['trace_cases']} 条用例有实体） |")
     a(f"| 引用相关度（top-1 均值） | {s['score_avg']} | 库内问题检索得分，区间 {s['score_min']}–{s['score_max']} |")
     a(f"| 平均响应延迟 | {s['latency_avg']}s | P95 = {s['latency_p95']}s，最长 {s['latency_max']}s |")
     a("")
 
     a("## 二、逐条结果")
     a("")
-    a("| ID | 模块 | 类型 | 结果 | 引用相关度 | 命中文档 | 说明 |")
-    a("|----|------|------|------|-----------|---------|------|")
+    a("| ID | 模块 | 类型 | 结果 | 引用相关度 | 溯源 | 命中文档 | 说明 |")
+    a("|----|------|------|------|-----------|------|---------|------|")
     for r in results:
         if not r["ok"]:
             status = f"❌ 失败（{r['error']}）"
@@ -319,7 +392,13 @@ def write_report(meta: dict, s: dict, results: list[dict], report_path: Path) ->
             status = "✅ 正确拒答" if r["passed"] else "❌ 未拒答"
         docs = "、".join(dict.fromkeys(r["docs"]))[:40] or "—"
         score = f"{r['top_score']:.2f}" if r["mode"] == "answer" else f"{r['top_score']:.4f}"
-        a(f"| {r['id']} | {r['module']} | {'库内' if r['mode'] == 'answer' else '越界'} | {status} | {score} | {docs} | {r['note'] or '—'} |")
+        if r.get("entity_total"):
+            trace = f"{r['entity_supported']}/{r['entity_total']}"
+            if r["unsupported_entities"]:
+                trace += f"（缺 {len(r['unsupported_entities'])}）"
+        else:
+            trace = "—"
+        a(f"| {r['id']} | {r['module']} | {'库内' if r['mode'] == 'answer' else '越界'} | {status} | {score} | {trace} | {docs} | {r['note'] or '—'} |")
     a("")
 
     a("## 三、验收结论")
@@ -335,6 +414,7 @@ def write_report(meta: dict, s: dict, results: list[dict], report_path: Path) ->
         a(f"- {name}：{r * 100:.1f}%（目标 ≥ {target * 100:.0f}%）{mark}")
     sr = s["citation_strict_ok"] / s["answer_total"] if s["answer_total"] else 0
     a(f"- 参考：严格口径命中率 {sr * 100:.1f}%（{s['citation_strict_ok']}/{s['answer_total']}，在文档级命中基础上再要求 top-1 ≥ {STRICT_CITE_SCORE}）")
+    a(f"- 参考：答案可溯源率 {s['trace_pct']}（{s['entity_supported']}/{s['entity_total']} 个 API 实体能在引用片段里找到出处，涉及 {s['trace_cases']} 条用例）")
     a(f"- 延迟：平均 {s['latency_avg']}s、P95 {s['latency_p95']}s（含 Render 冷启动与 Dify 端到端耗时）")
     a("")
 
@@ -347,7 +427,8 @@ def write_report(meta: dict, s: dict, results: list[dict], report_path: Path) ->
     a("- **引用相关度**：直接读取 `refs` 事件的 `sources[].score`（Rerank 重排序得分）取 top-1，是 RAG 独有的**客观信号**，回答「找得准不准」，与命中率分开统计。")
     a("- **口径说明**：早期版本把「top-1 得分 ≥ 0.5」并入命中率判据，实测发现库内正确召回片段的得分区间（0.10–1.00）与库外问题的得分区间（0.00–0.24）**存在重叠**，单一门槛既切不开二者，又会把「找对了文档但排序分偏低」的正确案例误判为未命中。因此本版将「召回」与「排序质量」解耦：命中率只判文档级召回，得分单独作为相关度呈现；同时保留「严格口径」（命中 且 top-1 ≥ 0.5）作为附加参考，便于与旧版对比。")
     a(f"- **越界拒答率**：以回复是否包含明确拒答表述为准；同时记录 top-1 检索得分（应 < {REFUSE_SCORE}，即检索层面也未命中）。")
-    a("- **局限**：关键词命中会漏判「表述不同但正确」的回答；延迟包含公网往返与免费实例冷启动，不代表模型自身耗时。")
+    a("- **答案可溯源率**：把回答里**模型自己标成代码**的标识符（行内 `` `code` `` 与代码块里的标识符，外加正文里带下划线的 API 名）抽出来，逐个到引用片段正文里做**不区分大小写**的包含匹配，匹配不上的记为「无出处」。它回答的是前三个指标都回答不了的问题：**这段回答本身有没有依据** —— 引对了文档、却顺手编一个文档里没有的参数名，是 RAG 最典型的失败模式。注意它是**代理指标**：能抓出「编 API」，但也会把合法的同义表述、以及片段被截断（`refs` 每段只带前 800 字符）算成缺口。")
+    a("- **局限**：关键词命中会漏判「表述不同但正确」的回答；可溯源率只覆盖「回答里确实写了代码实体」的用例（纯文字回答不计入分母）；延迟包含公网往返与免费实例冷启动，不代表模型自身耗时。")
     a("")
     a("### 复现方式")
     a("")
@@ -359,6 +440,18 @@ def write_report(meta: dict, s: dict, results: list[dict], report_path: Path) ->
     a("python3 server.py")
     a("python3 eval/run_eval.py --base http://localhost:3000 --delay 0")
     a("```")
+    a("")
+
+    a("## 五、可溯源明细（附录）")
+    a("")
+    if s["trace_gaps"]:
+        a("下面这些实体出现在回答里（模型自己把它们标成了代码），但在返回的引用片段正文里找不到出处。")
+        a("可能是模型顺手编的 API，也可能是片段被截断、或换了同义写法 —— 建议人工看一眼：")
+        a("")
+        for case_id, entities in s["trace_gaps"]:
+            a(f"- **{case_id}**：{'、'.join('`' + e + '`' for e in entities)}")
+    else:
+        a("✅ 回答里出现的 API 实体，出处都能在引用片段里找到。")
     a("")
 
     report_path.write_text("\n".join(lines), encoding="utf-8")
@@ -420,6 +513,7 @@ def main() -> int:
     print(f"引用命中率 : {s['citation_pct']}  ({s['citation_ok']}/{s['answer_total']})  [文档级召回]")
     print(f"  严格口径 : {s['citation_strict_pct']}  ({s['citation_strict_ok']}/{s['answer_total']})  [命中 且 top-1 ≥ {STRICT_CITE_SCORE}]")
     print(f"越界拒答率 : {s['refuse_pct']}  ({s['refuse_ok']}/{s['refuse_total']})")
+    print(f"答案可溯源率: {s['trace_pct']}  ({s['entity_supported']}/{s['entity_total']} 个实体有出处，{len(s['trace_gaps'])} 条用例有缺口)")
     print(f"引用相关度 : {s['score_avg']} (top-1 均值)")
     print(f"平均延迟   : {s['latency_avg']}s   (P95 {s['latency_p95']}s)")
     print(f"报告已写入 : {report_path}")

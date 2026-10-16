@@ -371,7 +371,7 @@ class TestPumpStream(ServerTestCase):
         return response_text(handler)
 
     def test_meta_delta_refs_done(self) -> None:
-        long_text = "片段内容" * 100          # 超过 200 字，验证会截断
+        long_text = "片段内容" * 250          # 1000 字，超过 800 上限，用来验证会截断
         raw = self.pump(
             {"event": "message", "answer": "你", "conversation_id": "conv-1"},
             {"event": "message", "answer": "好", "conversation_id": "conv-1"},
@@ -399,7 +399,7 @@ class TestPumpStream(ServerTestCase):
         self.assertEqual(set(first), {"document_name", "segment_position", "score", "content"})
         self.assertEqual(first["document_name"], "body.md")
         self.assertEqual(first["score"], 0.91)
-        self.assertEqual(len(first["content"]), 200)           # 只留前 200 字
+        self.assertEqual(len(first["content"]), 800)           # 只留前 800 字（评测要做可溯源核对）
         self.assertEqual(refs["sources"][1]["document_name"], "")
 
         # conversation_id 落到服务端会话上，下一轮由服务端自动带上

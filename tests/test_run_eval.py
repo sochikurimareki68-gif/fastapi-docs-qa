@@ -23,6 +23,58 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "eval"))
 import run_eval  # noqa: E402
 
 
+class TestAnswerEntities(unittest.TestCase):
+    """实体抽取规则：只认「模型自己标成代码」的东西，避免把正文词算进来。"""
+
+    def test_identifiers_inside_code_spans(self) -> None:
+        entities = run_eval.answer_entities("用 `APIRouter` 与 `include_router`，如 `app.include_router(router)`")
+        self.assertIn("APIRouter", entities)
+        self.assertIn("include_router", entities)
+        self.assertIn("router", entities)
+
+    def test_fenced_code_block(self) -> None:
+        entities = run_eval.answer_entities("```python\nfrom fastapi import APIRouter\n```")
+        self.assertIn("APIRouter", entities)
+
+    def test_prose_words_are_ignored(self) -> None:
+        # 正文里的品牌名/普通词不算断言（只有正文中带下划线的 API 名才收）
+        self.assertEqual(run_eval.answer_entities("这段说明提到 FastAPI 和路由器，还有 the code"), set())
+
+    def test_prose_underscore_token_is_counted(self) -> None:
+        self.assertIn("response_model", run_eval.answer_entities("用 response_model 过滤字段"))
+
+    def test_stopwords_are_filtered(self) -> None:
+        entities = run_eval.answer_entities("```python\nasync def read_item():\n    return True\n```")
+        for noise in ("async", "def", "return", "True"):
+            self.assertNotIn(noise, entities)
+        self.assertIn("read_item", entities)
+
+
+class TestTraceability(unittest.TestCase):
+    def test_finds_unsupported_entity(self) -> None:
+        """引对了文档、却编了文档里没有的 API 名 —— 这就是要抓的失败模式。"""
+        result = run_eval.traceability(
+            "用 `APIRouter` 或 `MagicRouter` 都行",
+            [{"content": "from fastapi import APIRouter\nrouter = APIRouter()"}],
+        )
+        self.assertEqual(result["entity_total"], 2)
+        self.assertEqual(result["entity_supported"], 1)
+        self.assertEqual(result["unsupported_entities"], ["MagicRouter"])
+
+    def test_match_is_case_insensitive(self) -> None:
+        result = run_eval.traceability("`APIRouter`", [{"content": "apirouter 的小写写法"}])
+        self.assertEqual(result["entity_supported"], 1)
+
+    def test_plain_text_answer_has_no_entities(self) -> None:
+        result = run_eval.traceability("这是一段纯文字的说明。", [{"content": "x"}])
+        self.assertEqual((result["entity_total"], result["entity_supported"]), (0, 0))
+        self.assertEqual(result["unsupported_entities"], [])
+
+    def test_missing_content_field_is_safe(self) -> None:
+        result = run_eval.traceability("`APIRouter`", [{"score": 0.9}])
+        self.assertEqual(result["unsupported_entities"], ["APIRouter"])
+
+
 class TestResolveReportPath(unittest.TestCase):
     def test_full_run_writes_full_report(self) -> None:
         self.assertEqual(run_eval.resolve_report_path(None, 0), run_eval.REPORT)

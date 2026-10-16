@@ -695,7 +695,10 @@ class Handler(BaseHTTPRequestHandler):
                             "document_name": r.get("document_name") or "",
                             "segment_position": r.get("segment_position"),
                             "score": r.get("score"),
-                            "content": (r.get("content") or "")[:200],
+                            # 片段正文：前端只展示开头几行，但评测要做「答案里的 API 能不能在
+                            # 引用片段里找到出处」的核对（可溯源性），截太短会凭空产生假阴性，
+                            # 所以留 800 字符（10 段合计约 8KB，对响应体积没有影响）
+                            "content": (r.get("content") or "")[:800],
                         })
 
             # 其余事件（workflow_started / node_finished / tts_message / ping 等）
