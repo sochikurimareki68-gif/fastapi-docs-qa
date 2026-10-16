@@ -3,7 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="基于 FastAPI 官方中文文档知识库的检索增强问答助手：回答问题并附引用来源，可溯源、不编造。">
 <title>FastAPI 文档助手 · 知识库智能问答</title>
+<!-- 内联 SVG 图标：免得浏览器去要 /favicon.ico 拿一个 404 -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23009e8a' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 5.5A2.5 2.5 0 016.5 3H19v15H6.5A2.5 2.5 0 004 20.5z'/%3E%3Cpath d='M8 8h7M8 11.5h5'/%3E%3C/svg%3E">
 <style>
   /* ==========================================================
      设计变量
@@ -265,7 +268,9 @@
   body[data-mode="checking"] .status-pill i { background: var(--score-mid); animation: pulse 1.4s ease-in-out infinite; }
   body[data-mode="unavailable"] .status-pill i { background: var(--score-lo); }
 
-  .src-toggle {
+  /* 窄屏（≤1180px）左栏整体隐藏后，顶栏这两个按钮补上它原有入口：「新对话」与「来源」。
+     宽屏时左栏自带「开启新对话」，来源面板常驻，两个按钮都收起。 */
+  .top-btn {
     display: none;
     align-items: center; gap: 6px;
     padding: 6px 11px;
@@ -276,7 +281,7 @@
     font-size: 11.5px;
     font-weight: 500;
   }
-  .src-toggle:hover { border-color: var(--accent); color: var(--accent); }
+  .top-btn:hover { border-color: var(--accent); color: var(--accent); }
 
   /* ---- 问答流 ---- */
   .stream {
@@ -687,9 +692,11 @@
 
   /* ================= 响应式 ================= */
   @media (max-width: 1180px) {
-    .app { grid-template-columns: 232px minmax(0, 1fr); }
+    /* 左栏 display:none、来源面板改 fixed 后，网格里只剩 main 一个在流内的元素，
+       会被自动摆进第一列（只剩 232px 宽）。所以这里直接把网格收成单列。 */
+    .app { grid-template-columns: minmax(0, 1fr); }
     .sidebar { display: none; }
-    .src-toggle { display: inline-flex; }
+    .top-btn { display: inline-flex; }
     .sources {
       position: fixed;
       top: 0; right: 0; bottom: 0;
@@ -775,7 +782,13 @@
       <h2>问答</h2>
       <div class="sep"></div>
       <span class="sub">回答均来自知识库检索结果，附引用来源</span>
-      <button class="src-toggle" id="srcToggle" type="button">
+      <button class="top-btn" id="newChatTop" type="button">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true">
+          <path d="M12 5v14M5 12h14"></path>
+        </svg>
+        新对话
+      </button>
+      <button class="top-btn" id="srcToggle" type="button">
         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M9 5h10M9 12h10M9 19h10"></path>
           <path d="M4.5 5h.01M4.5 12h.01M4.5 19h.01"></path>
@@ -809,7 +822,7 @@
     <div class="composer">
       <div class="composer-inner">
         <div class="input-shell">
-          <textarea id="input" rows="1" placeholder="连接服务中…" maxlength="500" disabled></textarea>
+          <textarea id="input" rows="1" placeholder="连接服务中…" maxlength="500" aria-label="输入你的 FastAPI 问题" disabled></textarea>
           <button class="send-btn" id="sendBtn" type="button" disabled aria-label="发送">
             <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M12 19.5V5"></path>
@@ -959,7 +972,9 @@
 
   // ---------- 界面状态 ----------
   function syncSendState() {
-    var usable = (mode === 'live');
+    // 服务端没配密钥时后端 reachable 但一问就是 500，所以「可用」必须同时满足
+    // mode=live 且 keyReady —— 否则用户会白打一长串字、点发送才看到报错。
+    var usable = (mode === 'live' && keyReady);
     inputEl.disabled = !usable || busy;
     sendBtn.disabled = !usable || busy || inputEl.value.trim().length === 0;
   }
@@ -974,7 +989,9 @@
     else statusText.textContent = '服务不可用';
 
     inputEl.placeholder = (mode === 'checking') ? '连接服务中…'
-      : (mode === 'unavailable' ? '服务暂不可用' : '输入你的 FastAPI 问题…');
+      : (mode === 'unavailable' ? '服务暂不可用'
+      : (mode === 'live' && !keyReady) ? '服务端未配置密钥，暂不可提问'
+      : '输入你的 FastAPI 问题…');
     syncSendState();
   }
 
@@ -1386,6 +1403,7 @@
   });
   sendBtn.addEventListener('click', submit);
   document.getElementById('newChat').addEventListener('click', resetConversation);
+  document.getElementById('newChatTop').addEventListener('click', resetConversation);   // 窄屏左栏隐藏后用它
 
   var srcToggle = document.getElementById('srcToggle');
   srcToggle.addEventListener('click', function () { sourcesEl.classList.add('open'); });

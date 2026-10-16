@@ -415,20 +415,25 @@ def write_report(meta: dict, s: dict, results: list[dict], report_path: Path) ->
     sr = s["citation_strict_ok"] / s["answer_total"] if s["answer_total"] else 0
     a(f"- 参考：严格口径命中率 {sr * 100:.1f}%（{s['citation_strict_ok']}/{s['answer_total']}，在文档级命中基础上再要求 top-1 ≥ {STRICT_CITE_SCORE}）")
     a(f"- 参考：答案可溯源率 {s['trace_pct']}（{s['entity_supported']}/{s['entity_total']} 个 API 实体能在引用片段里找到出处，涉及 {s['trace_cases']} 条用例）")
-    a(f"- 延迟：平均 {s['latency_avg']}s、P95 {s['latency_p95']}s（含 Render 冷启动与 Dify 端到端耗时）")
+    a(f"- 延迟：平均 {s['latency_avg']}s、P95 {s['latency_p95']}s（{meta['latency_note']}）")
     a("")
 
     a("## 四、评测方法与局限")
     a("")
     a("- **数据来源**：`eval/dataset.json`，库内 24 条覆盖路由 / 参数校验 / 请求体 / 表单文件 / 头部 Cookie / 依赖注入 / 安全认证 / 中间件 / 后台任务 / 响应模型 / 错误处理 / 项目结构 / 数据库；越界 4 条含闲聊与相近技术（Django）。")
-    a("- **调用方式**：逐条 `POST /api/chat`，每条用例使用独立会话（不带 cookie），保证互不影响；因代理有单 IP 每分钟 6 次限流，采用串行 + 间隔发送。")
+    a("- **调用方式**：逐条 `POST /api/chat`，每条用例使用独立会话（不带 cookie），保证互不影响；默认串行 + 间隔发送以避开代理的单 IP 限流（`--delay 0` 可在自行放宽限流后全速跑）。")
     a("- **答案准确率**：用回复是否命中预期关键词做**代理指标**（非人工标注）。")
     a("- **引用命中率（文档级召回）**：判据为「返回了引用片段，且引用文档中含 expect_docs 里任一标准文档」——即检索的 Hit Rate@K，回答「有没有找对资料」。")
     a("- **引用相关度**：直接读取 `refs` 事件的 `sources[].score`（Rerank 重排序得分）取 top-1，是 RAG 独有的**客观信号**，回答「找得准不准」，与命中率分开统计。")
     a("- **口径说明**：早期版本把「top-1 得分 ≥ 0.5」并入命中率判据，实测发现库内正确召回片段的得分区间（0.10–1.00）与库外问题的得分区间（0.00–0.24）**存在重叠**，单一门槛既切不开二者，又会把「找对了文档但排序分偏低」的正确案例误判为未命中。因此本版将「召回」与「排序质量」解耦：命中率只判文档级召回，得分单独作为相关度呈现；同时保留「严格口径」（命中 且 top-1 ≥ 0.5）作为附加参考，便于与旧版对比。")
     a(f"- **越界拒答率**：以回复是否包含明确拒答表述为准；同时记录 top-1 检索得分（应 < {REFUSE_SCORE}，即检索层面也未命中）。")
     a("- **答案可溯源率**：把回答里**模型自己标成代码**的标识符（行内 `` `code` `` 与代码块里的标识符，外加正文里带下划线的 API 名）抽出来，逐个到引用片段正文里做**不区分大小写**的包含匹配，匹配不上的记为「无出处」。它回答的是前三个指标都回答不了的问题：**这段回答本身有没有依据** —— 引对了文档、却顺手编一个文档里没有的参数名，是 RAG 最典型的失败模式。注意它是**代理指标**：能抓出「编 API」，但也会把合法的同义表述、以及片段被截断（`refs` 每段只带前 800 字符）算成缺口。")
-    a("- **局限**：关键词命中会漏判「表述不同但正确」的回答；可溯源率只覆盖「回答里确实写了代码实体」的用例（纯文字回答不计入分母）；延迟包含公网往返与免费实例冷启动，不代表模型自身耗时。")
+    a("- **局限**：关键词命中会漏判「表述不同但正确」的回答；可溯源率只覆盖「回答里确实写了代码实体」的用例（纯文字回答不计入分母）；延迟是端到端墙钟时间、不代表模型自身耗时，且随本次打的接口而变（具体包含什么见上方「接口归属」与验收结论里的延迟说明）。")
+    a(f"- **接口归属**：本报告记录的接口见开头（`{meta['base']}`）。代理层只做转发与防护，**检索与生成都在 Dify 侧**，所以换代理实例不改检索类指标（命中率 / 相关度 / 可溯源率）；会变的只有**延迟** —— 它随代理所在的网络与实例类型波动（{meta['latency_note']}）。")
+    if meta["corpus_docs"]:
+        a(f"- **语料覆盖**：{s['answer_total']} 条库内用例的 `expect_docs` 合计点到 {meta['covered_docs']} 篇文档，语料共 {meta['corpus_docs']} 篇，其余 {meta['corpus_docs'] - meta['covered_docs']} 篇**没有被任何用例要求召回**（它们有时会作为顺带命中的邻居出现在引用里，但没有被专门判过）。因此「引用命中率 100%」的适用范围是这 {meta['covered_docs']} 篇，不是全部语料。")
+    else:
+        a(f"- **语料覆盖**：{s['answer_total']} 条库内用例的 `expect_docs` 合计点到 {meta['covered_docs']} 篇文档；语料总篇数未在本机统计（`docs-source/` 不在，不影响指标）。")
     a("")
     a("### 复现方式")
     a("")
@@ -495,11 +500,22 @@ def main() -> int:
 
     s = summarize(results)
     report_path = resolve_report_path(args.out, args.limit)
+    local_base = any(h in args.base for h in ("localhost", "127.0.0.1", "0.0.0.0"))
+    corpus_dir = ROOT / "docs-source"
     meta = {
         "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "model": "DeepSeek V4.1 Flash（Dify 平台）+ bge-m3 混合检索（召回池 Top-K 20 / 返回 Top-K 10）+ Rerank（bge-reranker-v2-m3）+ 查询改写（火山方舟 glm-5-3-flash，检索前把口语提问改写成术语检索式）",
         "base": args.base,
         "kb": "FastAPI 官方中文文档 50 篇 · 知识库检索问答",
+        # 延迟里到底含什么，取决于本次打的是本地还是公网接口 —— 写死在报告里会误导
+        "latency_note": (
+            "含到 Dify 的公网往返与端到端耗时，不含部署平台的冷启动"
+            if local_base else
+            "含公网往返、免费实例冷启动与 Dify 端到端耗时"
+        ),
+        # 用例的 expect_docs 到底点到多少篇语料 —— 「命中率 100%」的适用范围就是这个数
+        "covered_docs": len({d for c in cases for d in (c.get("expect_docs") or [])}),
+        "corpus_docs": len(list(corpus_dir.glob("*.md"))) if corpus_dir.is_dir() else 0,
         "partial_note": (
             f"> ⚠️ **本次是抽样运行**：只跑了前 {len(cases)} 条用例，指标不代表全量；"
             f"交付用的全量报告在 `eval/report.md`。"

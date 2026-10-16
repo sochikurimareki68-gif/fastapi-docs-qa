@@ -9,6 +9,7 @@
   TestSessionStore  服务端会话：token 生成、conversation 映射、TTL 与容量上限
   TestOriginCheck   来源校验：同源放行、无来源/异源/null 拒绝、额外白名单生效
   TestChatGate      /api/chat 前置检查：分块传输、非法 Content-Length、限流、并发满
+  TestResetGate     /api/chat/reset 前置检查：与 /api/chat 同口径，且合法请求会读完 body
   TestPumpStream    Dify 事件流 → 前端五类事件（meta/delta/refs/error/done）的翻译
 
 为什么要这些测试：
@@ -458,6 +459,93 @@ class TestChatGate(ServerTestCase):
         raw = response_text(handler)
         self.assertIn("500", raw.splitlines()[0])
         self.assertIn("DIFY_API_KEY", raw)
+
+
+class TestResetGate(ServerTestCase):
+    """/api/chat/reset 的前置检查 —— 必须与 /api/chat 一致。
+
+    它不读 body 也能完成，于是很容易漏掉「提前返回却不读完 body」的分支：残留字节
+    会污染长连接上的下一个请求（反代会复用后端连接，后续请求全部损坏）。
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._saved = server.SESSIONS
+        server.SESSIONS = server.SessionStore()
+
+    def tearDown(self) -> None:
+        server.SESSIONS = self._saved
+        super().tearDown()
+
+    def call(self, headers: dict, body: bytes = b"") -> server.Handler:
+        handler = make_handler(headers, body)
+        handler._handle_reset()
+        return handler
+
+    def test_chunked_request_rejected_and_connection_closed(self) -> None:
+        handler = self.call({
+            "Host": "demo.example.com",
+            "Origin": "https://demo.example.com",
+            "Transfer-Encoding": "chunked",
+        })
+        raw = response_text(handler)
+        self.assertIn("411", raw.splitlines()[0])
+        self.assertTrue(handler.close_connection)
+
+    def test_invalid_content_length_rejected(self) -> None:
+        handler = self.call({
+            "Host": "demo.example.com",
+            "Origin": "https://demo.example.com",
+            "Content-Length": "abc",
+        })
+        self.assertIn("400", response_text(handler).splitlines()[0])
+        self.assertTrue(handler.close_connection)
+
+    def test_negative_content_length_rejected(self) -> None:
+        """负长度若放行，rfile.read(-5) 会一直读到连接关闭，把线程挂在那里。"""
+        handler = self.call({
+            "Host": "demo.example.com",
+            "Origin": "https://demo.example.com",
+            "Content-Length": "-5",
+        })
+        self.assertIn("400", response_text(handler).splitlines()[0])
+        self.assertTrue(handler.close_connection)
+
+    def test_oversized_body_rejected(self) -> None:
+        handler = self.call({
+            "Host": "demo.example.com",
+            "Origin": "https://demo.example.com",
+            "Content-Length": str(server.MAX_BODY_BYTES + 1),
+        })
+        self.assertIn("413", response_text(handler).splitlines()[0])
+
+    def test_missing_origin_rejected(self) -> None:
+        handler = self.call({"Host": "demo.example.com"})
+        self.assertIn("403", response_text(handler).splitlines()[0])
+
+    def test_declared_body_is_consumed_and_connection_survives(self) -> None:
+        """合法请求要把 body 读完并保持长连接 —— 否则残留字节会串到下一个请求。"""
+        handler = self.call({
+            "Host": "demo.example.com",
+            "Origin": "https://demo.example.com",
+            "Content-Length": "4",
+        }, body=b"junk")
+        raw = response_text(handler)
+        self.assertIn("200", raw.splitlines()[0])
+        self.assertFalse(handler.close_connection)
+        self.assertEqual(handler.rfile.read(), b"")     # body 已被读空
+
+    def test_reset_clears_server_side_conversation(self) -> None:
+        token, _user, _conv, epoch = server.SESSIONS.resolve("")
+        server.SESSIONS.set_conversation(token, "conv-1", epoch)
+        handler = self.call({
+            "Host": "demo.example.com",
+            "Origin": "https://demo.example.com",
+            "Content-Length": "0",
+            "Cookie": f"{server.SESSION_COOKIE}={token}",
+        })
+        self.assertIn("200", response_text(handler).splitlines()[0])
+        self.assertEqual(server.SESSIONS.resolve(token)[2], "")
 
 
 class TestPumpStream(ServerTestCase):

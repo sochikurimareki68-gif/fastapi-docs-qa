@@ -92,14 +92,18 @@ class TestResolveReportPath(unittest.TestCase):
 class TestReportHeader(unittest.TestCase):
     """抽样报告要自带「这不是全量」的警示，免得被人当成正式指标引用。"""
 
-    def render(self, partial_note: str) -> str:
+    def render(self, partial_note: str, **overrides) -> str:
         meta = {
             "time": "2026-01-01 00:00",
             "model": "测试模型",
             "base": "http://localhost:0000",
             "kb": "测试知识库",
+            "latency_note": "含到 Dify 的公网往返与端到端耗时，不含部署平台的冷启动",
+            "covered_docs": 25,
+            "corpus_docs": 50,
             "partial_note": partial_note,
         }
+        meta.update(overrides)
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "report.md"
             run_eval.write_report(meta, run_eval.summarize([]), [], path)
@@ -110,6 +114,27 @@ class TestReportHeader(unittest.TestCase):
 
     def test_full_run_has_no_warning(self) -> None:
         self.assertNotIn("抽样运行", self.render(""))
+
+    def test_report_records_which_interface_was_tested(self) -> None:
+        """接口归属必须写在报告里：否则「本地跑的」会被当成「线上跑通」。"""
+        text = self.render("")
+        self.assertIn("接口：`http://localhost:0000`", text)
+        self.assertIn("代理层只做转发与防护", text)
+
+    def test_latency_caveat_follows_the_interface(self) -> None:
+        self.assertIn("不含部署平台的冷启动", self.render(""))
+        public = self.render("", latency_note="含公网往返、免费实例冷启动与 Dify 端到端耗时")
+        self.assertIn("含公网往返、免费实例冷启动", public)
+
+    def test_corpus_coverage_limits_the_hit_rate_claim(self) -> None:
+        text = self.render("")
+        self.assertIn("合计点到 25 篇文档", text)
+        self.assertIn("其余 25 篇**没有被任何用例要求召回**", text)
+
+    def test_missing_corpus_dir_does_not_break_the_report(self) -> None:
+        """脚本可能在没带语料目录的机器上跑（线上复现），不能因此报错。"""
+        text = self.render("", corpus_docs=0)
+        self.assertIn("语料总篇数未在本机统计", text)
 
 
 if __name__ == "__main__":

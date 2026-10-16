@@ -664,11 +664,18 @@ class Handler(BaseHTTPRequestHandler):
             self._reject(403, "请求来源不被允许")
             return
         # 就算用不上 body，也要按声明的长度读完（或断开连接），
-        # 避免残留字节污染长连接上的下一个请求。
+        # 避免残留字节污染长连接上的下一个请求。这套前置检查与 /api/chat 保持一致：
+        # 少任何一条都会留下一个「提前返回却不读完 body」的分支。
+        if "chunked" in (self.headers.get("Transfer-Encoding") or "").lower():
+            self._reject(411, "暂不支持分块传输，请带上 Content-Length 发送请求")
+            return
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
-            length = 0
+            length = -1
+        if length < 0:      # 负长度继续往下走会变成 rfile.read(-5)，一直读到连接关闭才返回
+            self._reject(400, "Content-Length 不合法")
+            return
         if length > MAX_BODY_BYTES:
             self._reject(413, "请求体过大")
             return
