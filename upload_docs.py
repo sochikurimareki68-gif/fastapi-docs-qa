@@ -182,8 +182,12 @@ def fetch_documents(dataset_id: str) -> list[dict]:
     return documents
 
 
-def upload_one(dataset_id: str, name: str, text: str) -> None:
-    """推送单篇文档，命中限流时按递增退避重试。"""
+def upload_one(dataset_id: str, name: str, text: str, indexing: str = "high_quality") -> None:
+    """推送单篇文档，命中限流时按递增退避重试。
+
+    indexing 透传给 Dify 的 indexing_technique：
+    high_quality（向量检索，混合检索必需）或 economy（倒排索引）。
+    """
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             request(
@@ -192,7 +196,7 @@ def upload_one(dataset_id: str, name: str, text: str) -> None:
                 {
                     "name": name,
                     "text": text,
-                    "indexing_technique": "high_quality",
+                    "indexing_technique": indexing,
                     "process_rule": PROCESS_RULE,
                 },
             )
@@ -269,7 +273,7 @@ def cmd_upload(dataset_id: str, indexing: str, force: bool) -> None:
             print(f"{prefix}  → 已存在，跳过")
             continue
         try:
-            upload_one(dataset_id, name, path.read_text(encoding="utf-8"))
+            upload_one(dataset_id, name, path.read_text(encoding="utf-8"), indexing)
             ok += 1
             print(f"{prefix}  → 已提交")
         except (SystemExit, RateLimited) as exc:

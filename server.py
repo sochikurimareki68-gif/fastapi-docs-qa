@@ -765,8 +765,6 @@ class Handler(BaseHTTPRequestHandler):
             # 其余事件（workflow_started / node_finished / tts_message / ping 等）
             # 前端用不上，忽略。
 
-        if conversation_id and not sent_meta:
-            self._sse_send("meta", json.dumps({"conversation_id": conversation_id}, ensure_ascii=False))
         if sources:
             self._sse_send("refs", json.dumps({"sources": sources}, ensure_ascii=False))
         self._sse_send("done", "[DONE]")
