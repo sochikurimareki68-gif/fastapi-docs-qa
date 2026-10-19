@@ -176,24 +176,32 @@
   }
 
   .kb-card {
-    padding: 12px 13px;
+    padding: 10px 12px;
     border-radius: var(--radius-sm);
     background: var(--panel-2);
     border: 1px solid var(--line);
   }
   .kb-card .kb-name {
     display: flex; align-items: center; gap: 7px;
-    font-size: 12.5px; font-weight: 600; color: var(--ink);
-    margin-bottom: 8px;
+    font-size: 12px; font-weight: 600; color: var(--ink);
   }
   .kb-card .kb-name svg { color: var(--accent); flex: 0 0 auto; }
-  .kb-meta { display: grid; gap: 5px; }
-  .kb-meta div {
-    display: flex; justify-content: space-between; gap: 10px;
-    font-size: 11.5px; line-height: 1.45;
+  .kb-badge {
+    margin-left: auto;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    white-space: nowrap;
   }
-  .kb-meta dt { color: var(--muted); }
-  .kb-meta dd { color: var(--ink-2); font-weight: 500; }
+  .kb-desc {
+    margin-top: 6px;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--muted);
+  }
 
   .examples { display: grid; gap: 6px; }
   .ex-item {
@@ -243,8 +251,6 @@
     .topbar { background: rgba(18, 28, 32, 0.72); }
   }
   .topbar h2 { font-size: 13.5px; font-weight: 600; letter-spacing: 0.01em; }
-  .topbar .sep { width: 1px; height: 16px; background: var(--line-2); }
-  .topbar .sub { font-size: 11.5px; color: var(--muted); }
 
   .status-pill {
     margin-left: auto;
@@ -308,23 +314,23 @@
     box-shadow: 0 14px 30px -16px var(--accent);
     margin-bottom: 18px;
   }
-  .hero h1 { font-size: 25px; font-weight: 680; letter-spacing: -0.01em; line-height: 1.25; }
+  .hero h1 { font-size: 24px; font-weight: 680; letter-spacing: -0.01em; line-height: 1.3; }
   .hero p.lead {
-    margin-top: 10px;
-    font-size: 14px;
-    line-height: 1.75;
+    margin-top: 8px;
+    font-size: 13.5px;
+    line-height: 1.7;
     color: var(--ink-2);
-    max-width: 620px;
+    max-width: 540px;
   }
   .hero .cards {
-    margin-top: 24px;
+    margin-top: 20px;
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
   }
   .card {
     text-align: left;
-    padding: 14px 15px;
+    padding: 13px 14px;
     border-radius: var(--radius);
     border: 1px solid var(--line);
     background: var(--panel);
@@ -333,12 +339,10 @@
   }
   .card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: var(--shadow-pop); }
   .card .c-title {
-    display: flex; align-items: center; gap: 7px;
-    font-size: 13px; font-weight: 600; color: var(--ink);
-    margin-bottom: 5px;
+    font-size: 12.5px; font-weight: 600; color: var(--ink);
+    margin-bottom: 4px;
   }
-  .card .c-title .ic { color: var(--accent); flex: 0 0 auto; }
-  .card .c-sub { font-size: 12px; line-height: 1.6; color: var(--muted); }
+  .card .c-sub { font-size: 11.5px; line-height: 1.55; color: var(--muted); }
 
   /* ---- 一轮问答 ---- */
   .turn { padding-bottom: 26px; margin-bottom: 26px; border-bottom: 1px solid var(--line); }
@@ -346,7 +350,7 @@
 
   .q {
     position: relative;
-    padding: 11px 15px 11px 16px;
+    padding: 10px 14px 10px 15px;
     border-radius: var(--radius-sm);
     background: var(--panel);
     border: 1px solid var(--line);
@@ -360,15 +364,7 @@
     width: 3px;
     background: var(--q-bar);
   }
-  .q .q-label {
-    font-size: 10.5px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    color: var(--accent);
-    text-transform: uppercase;
-    margin-bottom: 4px;
-  }
-  .q .q-text { font-size: 14.5px; line-height: 1.6; font-weight: 500; word-break: break-word; }
+  .q .q-text { font-size: 14px; line-height: 1.6; font-weight: 500; word-break: break-word; }
   /* 查询改写：把「口语提问 → 术语检索式」这一步显式展示出来，一眼可见改写是否生效 */
   .q .q-rewrite {
     margin-top: 8px;
@@ -383,24 +379,14 @@
   }
   .q .q-rewrite b { color: var(--accent); font-weight: 600; }
 
-  .a { margin-top: 16px; display: flex; gap: 12px; }
-  .a-avatar {
-    flex: 0 0 28px;
-    width: 28px; height: 28px;
-    border-radius: 9px;
-    display: grid; place-items: center;
-    background: var(--accent-soft);
-    color: var(--accent);
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.02em;
-  }
-  .a-body { flex: 1; min-width: 0; }
+  .a { margin-top: 14px; }
+  .a-body { min-width: 0; }
   .a-meta {
     display: flex; align-items: center; gap: 9px;
     font-size: 11px; color: var(--faint);
     margin-bottom: 7px;
   }
+  .a-meta:empty { display: none; }
   .a-meta .pill {
     padding: 2px 8px;
     border-radius: 999px;
@@ -655,18 +641,9 @@
     color: var(--muted);
     word-break: break-word;
     display: -webkit-box;
-    -webkit-line-clamp: 4;
+    -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
-  }
-  .src-tags { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; }
-  .src-tag {
-    font-size: 10.5px;
-    padding: 2px 7px;
-    border-radius: 999px;
-    background: var(--accent-soft);
-    color: var(--accent);
-    font-weight: 550;
   }
 
   /* ================= 动效 ================= */
@@ -714,10 +691,8 @@
     .stream { padding: 20px 15px 8px; }
     .composer { padding: 10px 15px 14px; }
     .topbar { padding: 11px 15px; }
-    .topbar .sep, .topbar .sub { display: none; }
     .hero h1 { font-size: 21px; }
     .hero .cards { grid-template-columns: 1fr; }
-    .a { gap: 9px; }
   }
 </style>
 </head>
@@ -756,12 +731,9 @@
             <path d="M12 12l8.5-4.5M12 12v9M12 12L3.5 7.5"></path>
           </svg>
           FastAPI 文档库
+          <span class="kb-badge">50 篇</span>
         </div>
-        <dl class="kb-meta">
-          <div><dt>文档</dt><dd>50 篇中文文档</dd></div>
-          <div><dt>检索</dt><dd>混合检索 · bge-m3 + Rerank</dd></div>
-          <div><dt>召回</dt><dd>池 Top-K 20 · 返回 10</dd></div>
-        </dl>
+        <p class="kb-desc">混合检索 · bge-m3 + Rerank</p>
       </div>
     </div>
 
@@ -780,8 +752,6 @@
   <main class="main">
     <div class="topbar">
       <h2>问答</h2>
-      <div class="sep"></div>
-      <span class="sub">回答均来自知识库检索结果，附引用来源</span>
       <button class="top-btn" id="newChatTop" type="button">
         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true">
           <path d="M12 5v14M5 12h14"></path>
@@ -810,9 +780,7 @@
           </div>
           <h1>关于 FastAPI，你想知道什么？</h1>
           <p class="lead">
-            这是一个基于检索增强生成（RAG）的文档问答助手。你的问题会先在
-            <b>50 篇 FastAPI 中文文档</b>中做混合检索（向量语义 + 全文关键词），再由大模型严格依据检索结果作答，
-            每一条回答都能在右侧看到它引用了哪些文档、相关度多高。
+            基于 <b>50 篇 FastAPI 中文文档</b>检索作答，每条回答都会附上引用来源，方便核对。
           </p>
           <div class="cards" id="heroCards"></div>
         </section>
@@ -831,7 +799,7 @@
           </button>
         </div>
         <p class="hint">
-          <kbd>Enter</kbd> 发送 · <kbd>Shift</kbd> + <kbd>Enter</kbd> 换行 · 单次限 500 字
+          <kbd>Enter</kbd> 发送 · <kbd>Shift</kbd> + <kbd>Enter</kbd> 换行
         </p>
       </div>
     </div>
@@ -869,9 +837,7 @@
   var SIDEBAR_QUESTIONS = [
     '路径参数里的数值校验怎么做？',
     '如何启用 CORS 跨域？',
-    '后台任务（BackgroundTasks）怎么用？',
     'OAuth2 密码模式怎么实现？',
-    '怎么处理文件上传？',
     '依赖注入是怎么工作的？'
   ];
   var HERO_CARDS = [
@@ -904,10 +870,6 @@
   function esc(s) {
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-  }
-  function getTime() {
-    var d = new Date();
-    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
   }
   function isNearBottom() {
     return stream.scrollHeight - stream.scrollTop - stream.clientHeight < 90;
@@ -1081,9 +1043,6 @@
 
     var q = document.createElement('div');
     q.className = 'q';
-    var label = document.createElement('div');
-    label.className = 'q-label';
-    label.textContent = '你的问题';
     var qText = document.createElement('div');
     qText.className = 'q-text';
     qText.textContent = question;   // 用户输入一律走文本节点
@@ -1091,27 +1050,19 @@
     var rewrite = document.createElement('div');
     rewrite.className = 'q-rewrite';
     rewrite.hidden = true;
-    q.appendChild(label);
     q.appendChild(qText);
     q.appendChild(rewrite);
 
     var a = document.createElement('div');
     a.className = 'a';
-    var avatar = document.createElement('div');
-    avatar.className = 'a-avatar';
-    avatar.textContent = 'AI';
     var body = document.createElement('div');
     body.className = 'a-body';
     var meta = document.createElement('div');
     meta.className = 'a-meta';
-    var time = document.createElement('span');
-    time.textContent = getTime();
-    meta.appendChild(time);
     var content = document.createElement('div');
     content.className = 'a-content';
     body.appendChild(meta);
     body.appendChild(content);
-    a.appendChild(avatar);
     a.appendChild(body);
 
     turn.appendChild(q);
@@ -1198,20 +1149,6 @@
         snip.textContent = item.snippet;
         card.appendChild(snip);
       }
-
-      var tags = document.createElement('div');
-      tags.className = 'src-tags';
-      var t1 = document.createElement('span');
-      t1.className = 'src-tag';
-      t1.textContent = '命中 ' + item.count + ' 段';
-      tags.appendChild(t1);
-      if (list[0] && byDoc[name] === byDoc[(list[0].document_name || '未命名文档')]) {
-        var t2 = document.createElement('span');
-        t2.className = 'src-tag';
-        t2.textContent = '相关度最高';
-        tags.appendChild(t2);
-      }
-      card.appendChild(tags);
 
       sourcesBody.appendChild(card);
     });
@@ -1339,9 +1276,6 @@
         badge.textContent = '基于知识库';
         ref.meta.appendChild(badge);
       }
-      var el = document.createElement('span');
-      el.textContent = getTime();
-      ref.meta.insertBefore(el, ref.meta.firstChild.nextSibling || null);
     }).catch(function (err) {
       if (err && err.name === 'AbortError') return;   // 用户点了「新对话」，这段已经作废
       ref.content.className = 'a-content';
@@ -1416,17 +1350,7 @@
     btn.className = 'card';
     var title = document.createElement('div');
     title.className = 'c-title';
-    var ic = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    ic.setAttribute('viewBox', '0 0 24 24'); ic.setAttribute('width', '14'); ic.setAttribute('height', '14');
-    ic.setAttribute('fill', 'none'); ic.setAttribute('stroke', 'currentColor');
-    ic.setAttribute('stroke-width', '2.1'); ic.setAttribute('stroke-linecap', 'round');
-    ic.setAttribute('stroke-linejoin', 'round');
-    var pt = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    pt.setAttribute('d', 'M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z');
-    ic.appendChild(pt);
-    var span = document.createElement('span');
-    span.textContent = c.t;
-    title.appendChild(ic); title.appendChild(span);
+    title.textContent = c.t;
     var sub = document.createElement('div');
     sub.className = 'c-sub';
     sub.textContent = c.s;
