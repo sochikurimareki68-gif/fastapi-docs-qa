@@ -63,6 +63,9 @@ import query_rewrite   # 本地模块：口语化提问 → 带官方术语的�
 
 ROOT = Path(__file__).resolve().parent
 
+# G4：README 的事实区由 scripts/gen_readme_facts.py 从这里读取版本号，不再手写
+__version__ = "1.0.0"
+
 
 def load_dotenv(path: Path) -> None:
     """极简 .env 解析：KEY=VALUE，忽略空行与 # 注释。已存在的环境变量优先。"""
@@ -112,6 +115,83 @@ EXTRA_ORIGINS = [
 STATIC_EXTENSIONS = {
     ".html", ".css", ".js", ".svg", ".png", ".jpg", ".jpeg", ".ico", ".webp", ".woff2", ".map",
 }
+
+# ----------------------------------------------------------------------
+# 防复发闸门 G1 / G2（2026-11-09）
+#
+# G1 对应真实事故：Dify 知识库 50 篇文档被全部禁用，线上检索为 0、refs 长期空白，
+#     页面照常打开、没有任何报错，所以一直没人发现（简历里的指标就是在失效状态下写的）。
+#     这里的做法：进程记住「最近一次真的返回过引用」的时刻与条数，/api/health 暴露
+#     refs_ready / last_refs_at / kb_doc_count；再由 scripts/smoke_refs.py 每日真打一次
+#     已知答案的库内问题，断言 refs 非空。健康字段只观测、不主动烧额度。
+#
+# G2 对应「keepalive 配了但没生效」：Actions 被降频到 3.5–7 小时，实例照样休眠。
+#     这里记住「最近一次非健康检查的入站请求」时刻，health 暴露 last_activity_at 与
+#     keepalive_ok（默认 20 分钟窗口）。外部探活每 5 分钟打一次首页，心跳就会持续更新；
+#     超过窗口即说明探活没生效。接入步骤见 docs/keepalive.md。
+# ----------------------------------------------------------------------
+PROCESS_START = time.time()
+_ACTIVITY_LOCK = threading.Lock()
+_LAST_ACTIVITY = time.time()
+# 心跳窗口：超过这么久没有非健康检查流量，就判定 keepalive 失效（默认 20 分钟）
+KEEPALIVE_MAX_GAP_S = int(os.environ.get("KEEPALIVE_MAX_GAP_S", "1200"))
+# refs_ready 的保鲜期：每日冒烟会刷新一次，默认 26 小时（留 2 小时给定时任务漂移）
+REFS_READY_TTL_S = int(os.environ.get("REFS_READY_TTL_S", "93600"))
+# 知识库文档数：服务端无法直接读 Dify 控制台，只能由运维在环境变量里声明实际启用数。
+# 冒烟脚本命中 refs 才是硬证据；这两个字段只是让「50 篇是否被禁用」在读 health 时就能看见。
+KB_DOC_REQUIRED = int(os.environ.get("KB_DOC_REQUIRED", "50"))
+KB_DOC_COUNT = int(os.environ.get("KB_DOC_COUNT", str(KB_DOC_REQUIRED)))
+_REFS_STATE = {"last_refs_at": 0.0, "last_refs_count": 0}
+
+
+def mark_activity() -> None:
+    """记录一次真实入站流量（健康检查自身不计，否则探针永远不会显示失效）。"""
+    global _LAST_ACTIVITY
+    with _ACTIVITY_LOCK:
+        _LAST_ACTIVITY = time.time()
+
+
+def record_refs(count: int) -> None:
+    """记录一次成功返回引用的检索。count <= 0 时不更新 —— 越界拒答本来就可能没有引用。"""
+    if count <= 0:
+        return
+    with _ACTIVITY_LOCK:
+        _REFS_STATE["last_refs_at"] = time.time()
+        _REFS_STATE["last_refs_count"] = int(count)
+
+
+def iso_utc(ts: float) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts))
+
+
+def keepalive_snapshot() -> dict:
+    now = time.time()
+    gap = max(0.0, now - _LAST_ACTIVITY)
+    return {
+        "uptime_s": round(now - PROCESS_START, 1),
+        "last_activity_at": iso_utc(_LAST_ACTIVITY),
+        "seconds_since_activity": round(gap, 1),
+        "keepalive_window_s": KEEPALIVE_MAX_GAP_S,
+        "keepalive_ok": gap <= KEEPALIVE_MAX_GAP_S,
+    }
+
+
+def retrieval_snapshot() -> dict:
+    now = time.time()
+    last = _REFS_STATE["last_refs_at"]
+    age = (now - last) if last else None
+    # None = 本进程还没见过任何引用（刚重启/刚部署），前端不据此告警
+    ready = None if age is None else age <= REFS_READY_TTL_S
+    return {
+        "refs_ready": ready,
+        "last_refs_at": iso_utc(last) if last else None,
+        "seconds_since_refs": round(age, 1) if age is not None else None,
+        "last_refs_count": _REFS_STATE["last_refs_count"],
+        "kb_doc_count": KB_DOC_COUNT,
+        "kb_doc_required": KB_DOC_REQUIRED,
+        "kb_docs_ok": KB_DOC_COUNT >= KB_DOC_REQUIRED,
+    }
+
 
 
 class RateLimiter:
@@ -436,9 +516,13 @@ class Handler(BaseHTTPRequestHandler):
         self._pending_cookie = ""      # 同一连接会连续处理多个请求，进入时必须清空
         parsed = urlparse(self.path)
         path = parsed.path
+        if path != "/api/health":
+            # G2：只有真实入站流量（首页、静态资源）才算心跳，健康检查自己不算
+            mark_activity()
         if path == "/api/health":
             payload = {
                 "ok": True,
+                "version": __version__,
                 "api_base": DIFY_BASE,
                 "api_key_ready": bool(DIFY_API_KEY),
                 # 查询改写是可选能力（没配密钥会自动跳过）。把它是否就绪一并暴露出来 ——
@@ -448,7 +532,10 @@ class Handler(BaseHTTPRequestHandler):
                     "key_ready": query_rewrite.is_configured(),
                     "model": query_rewrite.model_name(),
                 },
+                # G1/G2：检索是否真的返回过引用、知识库文档数是否符合预期、keepalive 是否在跳
+                "retrieval": retrieval_snapshot(),
             }
+            payload.update(keepalive_snapshot())
             # 深检（?deep=1）：key_ready 只说明「变量非空」，区分不了「填错了另一把
             # 长得一样的密钥」。带上 deep=1 时真发一次极短的上游请求，把有效性也报出来。
             # 它会消耗一点额度，所以默认不跑，只给排障时手动触发 —— 也正因为要花额度，
@@ -465,6 +552,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         self._pending_cookie = ""      # 同上
+        mark_activity()                # G2：任何 POST 都算真实流量
         path = urlparse(self.path).path
         if path == "/api/chat":
             self._handle_chat()
@@ -775,6 +863,8 @@ class Handler(BaseHTTPRequestHandler):
             # 前端用不上，忽略。
 
         if sources:
+            # G1：记下「最近一次真的带回了引用」，/api/health 据此判断 refs_ready
+            record_refs(len(sources))
             self._sse_send("refs", json.dumps({"sources": sources}, ensure_ascii=False))
         self._sse_send("done", "[DONE]")
 

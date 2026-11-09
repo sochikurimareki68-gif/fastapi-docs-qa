@@ -850,6 +850,10 @@
   // ---------- 运行状态 ----------
   var mode = 'checking';     // checking | live | unavailable
   var keyReady = false;
+  // G1：健康检查里 retrieval.refs_ready === false 时，页面顶部提示「检索没有引用」，
+  // 避免知识库被禁用后页面照常可用、却没人发现（历史事故）。
+  var retrievalWarn = '';
+  var retrievalWarnShown = false;
   var busy = false;
   // 在途请求的中止器 + 请求序号：点「新对话」或发了新问题时，用它把上一条流作废
   // （否则旧回答会继续往已被清空的界面上写，还会误把输入框解锁）
@@ -970,6 +974,16 @@
           return resp.json().then(function (data) {
             if (!data || !data.ok) { resolve('down'); return; }
             keyReady = !!data.api_key_ready;
+            // G1：知识库文档数低于要求，或最近一天内的问答没有返回任何引用 —— 明确告警，
+            // 不再让「页面能开、检索为空」这种静默故障混过去。
+            var r = data.retrieval || {};
+            if (r.kb_docs_ok === false) {
+              retrievalWarn = '知识库当前启用文档数为 ' + r.kb_doc_count + '，低于要求的 '
+                + r.kb_doc_required + ' 篇，检索结果可能不完整。';
+            } else if (r.refs_ready === false) {
+              retrievalWarn = '最近一次问答没有返回任何引用来源（refs 为空），'
+                + '疑似知识库文档被禁用或索引失效。';
+            }
             resolve('ok');
           }).catch(function () { resolve('static'); });
         })
@@ -986,7 +1000,15 @@
 
     while (true) {
       var state = await probeHealth(8000);
-      if (state === 'ok') { setMode('live'); return; }
+      if (state === 'ok') {
+        setMode('live');
+        // G1：检索异常只在首次连上时提示一次，避免每次重连都重复堆横幅
+        if (retrievalWarn && !retrievalWarnShown) {
+          retrievalWarnShown = true;
+          addNotice(retrievalWarn, true);
+        }
+        return;
+      }
       if (state === 'static') {
         setMode('unavailable');
         addNotice('没有检测到后端服务（/api/health 不存在）。本页需要配合 server.py 一起运行。', true);

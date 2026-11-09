@@ -1,0 +1,19 @@
+{
+  "project": "FastAPI 文档智能问答助手",
+  "github_owner": "sochikurimareki68-gif",
+  "period": {
+    "start": "2026-10",
+    "end": "2026-10",
+    "basis": "简历A版（离职后个人项目），与 git 首个提交 2026-10 对齐"
+  },
+  "metrics": {
+    "answer_pct": 100.0,
+    "citation_pct": 95.8,
+    "refuse_pct": 100.0,
+    "trace_pct": 99.5
+  },
+  "counts": {
+    "answer": 24,
+    "refuse": 4
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "_comment": "架构参数唯一来源：README 事实区（G4）从这里读取，改知识库模型/检索参数时同步改这里",
+  "kb_docs": 50,
+  "recall_top_k": 20,
+  "return_top_k": 10,
+  "rerank": true
+}

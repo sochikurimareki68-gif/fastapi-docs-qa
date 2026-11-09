@@ -58,6 +58,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DATASET = ROOT / "eval" / "dataset.json"
 REPORT = ROOT / "eval" / "report.md"
+# G3：结构化真源，与 report.md 同时产出；README/简历声明一律以它为准
+REPORT_JSON = ROOT / "eval" / "report.json"
 # 抽样运行的默认输出：不碰交付用的全量报告
 PARTIAL_REPORT = ROOT / "eval" / "report.partial.md"
 
@@ -479,6 +481,41 @@ def write_report(meta: dict, s: dict, results: list[dict], report_path: Path) ->
     a("")
 
     report_path.write_text("\n".join(lines), encoding="utf-8")
+
+    # G3：报告 md 是给人看的，数字容易被手抄走样。全量跑时同步落一份结构化
+    # eval/report.json 作为唯一真源，README 事实区与 resume_claims.json 都拿它核对。
+    if report_path == REPORT:
+        def pct(key: str) -> float | None:
+            raw = str(s.get(key, "—")).rstrip("%")
+            try:
+                return float(raw)
+            except ValueError:
+                return None
+
+        payload = {
+            "schema": 1,
+            "time": meta["time"],
+            "base": meta["base"],
+            "total": s["total"],
+            "succeeded": s["succeeded"],
+            "failed": s["failed"],
+            "metrics": {
+                "answer_pct": pct("answer_pct"),
+                "citation_pct": pct("citation_pct"),
+                "citation_strict_pct": pct("citation_strict_pct"),
+                "refuse_pct": pct("refuse_pct"),
+                "trace_pct": pct("trace_pct"),
+                "score_avg": s["score_avg"],
+                "latency_avg_s": s["latency_avg"],
+            },
+            "counts": {
+                "answer": s["answer_total"],
+                "refuse": s["refuse_total"],
+                "trace_supported": s["entity_supported"],
+                "trace_total": s["entity_total"],
+            },
+        }
+        REPORT_JSON.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def main() -> int:

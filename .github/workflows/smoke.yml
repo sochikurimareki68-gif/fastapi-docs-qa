@@ -1,0 +1,41 @@
+# G1 外部冒烟：每天真打一次线上问答，断言知识库引用（refs）非空
+#
+# 为什么单独放一个 workflow：
+#   常规 CI 不碰线上服务（部署有延迟、免费实例会冷启动），而 G1 要防的恰恰是
+#   「代码全绿、线上检索却为空」—— 必须每天用真实请求验证一次。
+#   本任务不需要任何密钥（匿名访问 Demo），失败会在 Actions 里亮红。
+name: Smoke · refs
+
+on:
+  schedule:
+    # 每天 01:00 UTC（北京时间 09:00）
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "要冒烟的服务地址"
+        required: false
+        default: "https://fastapi-docs-qa.onrender.com"
+
+jobs:
+  refs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 冒烟断言（refs 非空 + 越界拒答）
+        env:
+          SMOKE_BASE_URL: ${{ github.event.inputs.base || 'https://fastapi-docs-qa.onrender.com' }}
+        run: python scripts/smoke_refs.py
+
+      - name: 失败提示
+        if: failure()
+        run: |
+          echo "::error::G1 冒烟失败：线上 refs 为空或越界拒答异常。"
+          echo "优先检查 Dify 知识库 50 篇文档是否仍处于启用状态、应用是否仍关联知识库。"
+          echo "排查顺序：Dify 知识库文档是否启用 → 应用是否关联知识库 → /api/health 的 retrieval 字段。"

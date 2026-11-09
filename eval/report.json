@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "time": "2026-11-09 16:09",
+  "base": "https://fastapi-docs-qa.onrender.com",
+  "total": 28,
+  "succeeded": 28,
+  "failed": 0,
+  "metrics": {
+    "answer_pct": 100.0,
+    "citation_pct": 95.8,
+    "citation_strict_pct": 95.8,
+    "refuse_pct": 100.0,
+    "trace_pct": 99.5,
+    "score_avg": 0.91,
+    "latency_avg_s": 13.4
+  },
+  "counts": {
+    "answer": 24,
+    "refuse": 4,
+    "trace_supported": 609,
+    "trace_total": 612
+  }
+}

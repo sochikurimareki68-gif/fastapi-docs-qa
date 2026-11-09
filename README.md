@@ -4,6 +4,17 @@
 
 > 当前状态：已部署上线并通过效果评测（28 条用例，2026-11-09 线上全量：答案准确率 100%、越界拒答率 100%、引用命中率 95.8%、严格口径 95.8%、答案可溯源率 99.5%、引用相关度 0.91；引用命中少 1 条为 c11 单次检索波动，复核该题 top-1=0.99 且命中预期文档），8 阶段计划全部完成；评测后追加六轮优化 —— 检索优化（召回池 Top-K 20 / 返回 Top-K 10 + Rerank，引用命中率 70.8% → 100%）、分段策略修复（自定义分段 + 关闭空格压缩，修好检索片段里 Python 代码缩进被压坏的问题）、语料复核（修正被误判的跳过名单、收回 2 篇章节正文，并补上一条被掩盖的引用判据）、查询改写（口语提问先改写成术语检索式再检索，历史全量严格口径 95.8% → 100%、相关度 0.84 → 0.91~0.97）、可溯源判定（新增「答案可溯源率」：回答里模型标成代码的 API 实体必须在引用片段里有出处）、健康检查深检与会话/前端收尾 + 终检修复（详见路线图）
 
+<!-- FACTS:BEGIN -->
+> **自动生成事实区** —— 由 `scripts/gen_readme_facts.py` 从代码、数据集与评测报告生成，**请勿手改**；校验命令：`python3 scripts/gen_readme_facts.py --check`。
+>
+> - 版本：v1.0.0（`server.py` 的 `__version__`）
+> - 单元测试：110 条
+> - 评测用例：28 条（库内 24 / 越界 4）
+> - 知识库：50 篇；召回池 Top-K 20 / 返回 Top-K 10 / Rerank
+> - 最新评测（2026-11-09 16:09）：答案准确率 100.0%、引用命中率 95.8%、越界拒答率 100.0%、答案可溯源率 99.5%
+> - `/api/health` 字段：ok, version, api_base, api_key_ready, query_rewrite.enabled, query_rewrite.key_ready, query_rewrite.model, retrieval.refs_ready, retrieval.last_refs_at, retrieval.seconds_since_refs, retrieval.last_refs_count, retrieval.kb_doc_count, retrieval.kb_doc_required, retrieval.kb_docs_ok, uptime_s, last_activity_at, seconds_since_activity, keepalive_window_s, keepalive_ok
+<!-- FACTS:END -->
+
 **在线 Demo（可用问答）**：<https://fastapi-docs-qa.onrender.com/>
 
 > 说明：`server.py` 同时托管前端与 `/api/*`，因此该地址打开即是完整 Demo（前端与后端同源）。服务托管在 Render 免费版，**15 分钟无访问会休眠**，首次打开需等待约 1 分钟唤醒（页面会显示「检测中」）。
