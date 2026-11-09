@@ -450,7 +450,7 @@ def write_report(meta: dict, s: dict, results: list[dict], report_path: Path) ->
     a("- **局限**：关键词命中会漏判「表述不同但正确」的回答；可溯源率只覆盖「回答里确实写了代码实体」的用例（纯文字回答不计入分母）；延迟是端到端墙钟时间、不代表模型自身耗时，且随本次打的接口而变（具体包含什么见上方「接口归属」与验收结论里的延迟说明）。")
     a(f"- **接口归属**：本报告记录的接口见开头（`{meta['base']}`）。代理层只做转发与防护，**检索与生成都在 Dify 侧**，所以换代理实例不改检索类指标（命中率 / 相关度 / 可溯源率）；会变的只有**延迟** —— 它随代理所在的网络与实例类型波动（{meta['latency_note']}）。")
     if meta["corpus_docs"]:
-        a(f"- **语料覆盖**：{s['answer_total']} 条库内用例的 `expect_docs` 合计点到 {meta['covered_docs']} 篇文档，语料共 {meta['corpus_docs']} 篇，其余 {meta['corpus_docs'] - meta['covered_docs']} 篇**没有被任何用例要求召回**（它们有时会作为顺带命中的邻居出现在引用里，但没有被专门判过）。因此「引用命中率 100%」的适用范围是这 {meta['covered_docs']} 篇，不是全部语料。")
+        a(f"- **语料覆盖**：{s['answer_total']} 条库内用例的 `expect_docs` 合计点到 {meta['covered_docs']} 篇文档，语料共 {meta['corpus_docs']} 篇，其余 {meta['corpus_docs'] - meta['covered_docs']} 篇**没有被任何用例要求召回**（它们有时会作为顺带命中的邻居出现在引用里，但没有被专门判过）。因此「引用命中率 {s['citation_pct']}」的适用范围是这 {meta['covered_docs']} 篇，不是全部语料。")
     else:
         a(f"- **语料覆盖**：{s['answer_total']} 条库内用例的 `expect_docs` 合计点到 {meta['covered_docs']} 篇文档；语料总篇数未在本机统计（`docs-source/` 不在，不影响指标）。")
     a("")

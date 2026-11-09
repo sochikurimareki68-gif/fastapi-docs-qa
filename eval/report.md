@@ -1,6 +1,6 @@
 # 项目二 · 效果评测报告（RAG 知识库问答）
 
-> 生成时间：2026-10-18 13:59　|　生成模型：DeepSeek V4.1 Flash（Dify 平台）+ bge-m3 混合检索（召回池 Top-K 20 / 返回 Top-K 10）+ Rerank（bge-reranker-v2-m3）+ 查询改写（火山方舟 glm-5-3-flash，检索前把口语提问改写成术语检索式）　|　接口：`http://localhost:3000`
+> 生成时间：2026-11-09 16:09　|　生成模型：DeepSeek V4.1 Flash（Dify 平台）+ bge-m3 混合检索（召回池 Top-K 20 / 返回 Top-K 10）+ Rerank（bge-reranker-v2-m3）+ 查询改写（火山方舟 glm-5-3-flash，检索前把口语提问改写成术语检索式）　|　接口：`https://fastapi-docs-qa.onrender.com`
 > 知识库：FastAPI 官方中文文档 50 篇 · 知识库检索问答
 > 用例总数：28（库内 24 / 越界 4）　|　成功返回：28　|　失败：0
 
@@ -9,54 +9,54 @@
 | 指标 | 结果 | 说明 |
 |------|------|------|
 | **答案准确率** | **100.0%**（24/24） | 库内问题：回复命中预期关键词（正确性代理指标） |
-| **引用命中率**（文档级召回） | **100.0%**（24/24） | 库内问题：返回引用且命中 expect_docs 中任一文档（Hit Rate@K） |
+| **引用命中率**（文档级召回） | **95.8%**（23/24） | 库内问题：返回引用且命中 expect_docs 中任一文档（Hit Rate@K） |
 | └ 严格口径（附加参考） | 95.8%（23/24） | 在文档级命中基础上，再要求 top-1 得分 ≥ 0.5 |
 | **越界拒答率** | **100.0%**（4/4） | 库外问题：明确拒答而非编造 |
-| **答案可溯源率** | **99.0%**（514/519） | 回答里模型标成代码的 API 实体，能在引用片段正文里找到出处的比例（23 条用例有实体） |
-| 引用相关度（top-1 均值） | 0.84 | 库内问题检索得分，区间 0.09–1.0 |
-| 平均响应延迟 | 7.0s | P95 = 9.6s，最长 9.6s |
+| **答案可溯源率** | **99.5%**（609/612） | 回答里模型标成代码的 API 实体，能在引用片段正文里找到出处的比例（23 条用例有实体） |
+| 引用相关度（top-1 均值） | 0.91 | 库内问题检索得分，区间 0.05–1.0 |
+| 平均响应延迟 | 13.4s | P95 = 17.4s，最长 25.2s |
 
 ## 二、逐条结果
 
 | ID | 模块 | 类型 | 结果 | 引用相关度 | 溯源 | 命中文档 | 说明 |
 |----|------|------|------|-----------|------|---------|------|
-| c01 | 路由基础 | 库内 | ✅ 通过 | 0.85 | 12/12 | first-steps.md、debugging.md、bigger-appli | — |
-| c02 | 路径参数 | 库内 | ✅ 通过 | 0.92 | 18/18 | path-params.md、body.md、path-params-numer | — |
-| c03 | 路径参数校验 | 库内 | ✅ 通过 | 0.87 | 18/18 | path-params-numeric-validations.md、query | — |
+| c01 | 路由基础 | 库内 | ✅ 通过 | 0.82 | 28/28 | first-steps.md、debugging.md、bigger-appli | — |
+| c02 | 路径参数 | 库内 | ✅ 通过 | 1.00 | 16/16 | path-params.md、body.md、query-params.md、b | — |
+| c03 | 路径参数校验 | 库内 | ✅ 通过 | 0.83 | 18/18 | path-params-numeric-validations.md、query | — |
 | c04 | 查询参数校验 | 库内 | ✅ 通过 | 0.79 | 25/25 | query-params-str-validations.md、query-pa | — |
-| c05 | 请求体 | 库内 | ✅ 通过 | 0.97 | 28/28 | body.md、body-nested-models.md、body-multi | — |
-| c06 | 请求体字段 | 库内 | ✅ 通过 | 0.62 | 8/8 | body-fields.md、query-params-str-validati | — |
-| c07 | 嵌套模型 | 库内 | ✅ 通过 | 0.58 | 20/20 | body-nested-models.md、body-multiple-para | — |
-| c08 | 多来源参数 | 库内 | ✅ 通过 | 0.99 | 21/21 | body.md、body-multiple-params.md、query-pa | — |
-| c09 | 表单 | 库内 | ✅ 通过 | 0.87 | 23/23 | request-forms.md、request-files.md、reques | — |
-| c10 | 文件上传 | 库内 | ✅ 通过 | 0.66 | 48/48 | request-files.md | — |
-| c11 | 文件与表单 | 库内 | ✅ 通过 | 0.96 | 25/25 | request-forms-and-files.md、request-files | — |
-| c12 | 请求头 | 库内 | ✅ 通过 | 0.94 | 18/18 | header-params.md、security-first-steps.md | — |
-| c13 | Cookie | 库内 | ✅ 通过 | 0.81 | 22/22 | cookie-param-models.md、query-param-model | — |
-| c14 | 依赖注入 | 库内 | ✅ 通过 | 0.99 | 23/23 | background-tasks.md、dependencies-sub-dep | — |
-| c15 | 依赖清理 | 库内 | ✅ 通过 | 0.93 | 28/28 | dependencies-dependencies-with-yield.md | — |
-| c16 | 安全认证 | 库内 | ✅ 通过 | 0.93 | 11/11 | security-first-steps.md、security-simple- | — |
+| c05 | 请求体 | 库内 | ✅ 通过 | 0.98 | 28/28 | body-nested-models.md、body.md、schema-ext | — |
+| c06 | 请求体字段 | 库内 | ✅ 通过 | 0.88 | 43/43 | body-fields.md、query-param-models.md、sch | — |
+| c07 | 嵌套模型 | 库内 | ✅ 通过 | 0.90 | 25/25 | body-nested-models.md、request-form-model | — |
+| c08 | 多来源参数 | 库内 | ✅ 通过 | 0.99 | 23/24（缺 1） | body.md、body-multiple-params.md、query-pa | — |
+| c09 | 表单 | 库内 | ✅ 通过 | 0.97 | 27/27 | request-form-models.md、request-forms.md、 | — |
+| c10 | 文件上传 | 库内 | ✅ 通过 | 0.96 | 33/33 | request-files.md | — |
+| c11 | 文件与表单 | 库内 | ✅ 通过 | 0.05 | — | sql-databases.md、body-updates.md、path-pa | 答案正确但引用未命中（未召回预期文档，top1=0.05） |
+| c12 | 请求头 | 库内 | ✅ 通过 | 0.99 | 43/43 | header-params.md、header-param-models.md、 | — |
+| c13 | Cookie | 库内 | ✅ 通过 | 0.98 | 20/20 | cookie-params.md、cookie-param-models.md、 | — |
+| c14 | 依赖注入 | 库内 | ✅ 通过 | 0.99 | 21/21 | background-tasks.md、dependencies-sub-dep | — |
+| c15 | 依赖清理 | 库内 | ✅ 通过 | 0.93 | 25/25 | dependencies-dependencies-with-yield.md | — |
+| c16 | 安全认证 | 库内 | ✅ 通过 | 0.93 | 13/13 | security-first-steps.md、security-simple- | — |
 | c17 | JWT | 库内 | ✅ 通过 | 0.99 | 17/19（缺 2） | security-oauth2-jwt.md、security-first-st | — |
-| c18 | 跨域 | 库内 | ✅ 通过 | 0.90 | 39/39 | cors.md、middleware.md | — |
+| c18 | 跨域 | 库内 | ✅ 通过 | 0.97 | 34/34 | cors.md、middleware.md | — |
 | c19 | 中间件 | 库内 | ✅ 通过 | 1.00 | 21/21 | middleware.md、cors.md、dependencies-depen | — |
-| c20 | 后台任务 | 库内 | ✅ 通过 | 0.92 | 30/33（缺 3） | background-tasks.md、dependencies-depende | — |
-| c21 | 响应模型 | 库内 | ✅ 通过 | 0.99 | 8/8 | response-model.md、sql-databases.md | — |
-| c22 | 错误处理 | 库内 | ✅ 通过 | 0.81 | 25/25 | handling-errors.md、path-operation-config | — |
-| c23 | 大型项目结构 | 库内 | ✅ 通过 | 0.09 | 26/26 | dependencies-global-dependencies.md、depe | 引用命中（文档级），相关度偏低 top1=0.09 |
-| c24 | 数据库 | 库内 | ✅ 通过 | 0.87 | — | server-sent-events.md、body.md、query-para | — |
-| o01 | 越界-闲聊 | 越界 | ✅ 正确拒答 | 0.0000 | — | handling-errors.md、debugging.md、extra-da | — |
+| c20 | 后台任务 | 库内 | ✅ 通过 | 0.99 | 28/28 | background-tasks.md、middleware.md、depend | — |
+| c21 | 响应模型 | 库内 | ✅ 通过 | 0.99 | 15/15 | response-model.md、sql-databases.md | — |
+| c22 | 错误处理 | 库内 | ✅ 通过 | 0.99 | 41/41 | handling-errors.md、dependencies-dependen | — |
+| c23 | 大型项目结构 | 库内 | ✅ 通过 | 0.94 | 34/34 | bigger-applications.md、frontend.md | — |
+| c24 | 数据库 | 库内 | ✅ 通过 | 1.00 | 31/31 | sql-databases.md | — |
+| o01 | 越界-闲聊 | 越界 | ✅ 正确拒答 | 0.0000 | — | handling-errors.md、extra-data-types.md、c | — |
 | o02 | 越界-闲聊 | 越界 | ✅ 正确拒答 | 0.0010 | — | handling-errors.md、testing.md、extra-data | — |
-| o03 | 越界-相近技术 | 越界 | ✅ 正确拒答 | 0.3000 | — | sql-databases.md、body.md、extra-models.md | — |
+| o03 | 越界-相近技术 | 越界 | ✅ 正确拒答 | 0.3030 | — | sql-databases.md、body.md、security-oauth2 | — |
 | o04 | 越界-闲聊 | 越界 | ✅ 正确拒答 | 0.0050 | — | query-params-str-validations.md、server-s | — |
 
 ## 三、验收结论
 
 - 答案准确率：100.0%（目标 ≥ 85%）✅ 达标
-- 引用命中率（文档级召回）：100.0%（目标 ≥ 85%）✅ 达标
+- 引用命中率（文档级召回）：95.8%（目标 ≥ 85%）✅ 达标
 - 越界拒答率：100.0%（目标 ≥ 100%）✅ 达标
 - 参考：严格口径命中率 95.8%（23/24，在文档级命中基础上再要求 top-1 ≥ 0.5）
-- 参考：答案可溯源率 99.0%（514/519 个 API 实体能在引用片段里找到出处，涉及 23 条用例）
-- 延迟：平均 7.0s、P95 9.6s（含到 Dify 的公网往返与端到端耗时，不含部署平台的冷启动）
+- 参考：答案可溯源率 99.5%（609/612 个 API 实体能在引用片段里找到出处，涉及 23 条用例）
+- 延迟：平均 13.4s、P95 17.4s（含公网往返、免费实例冷启动与 Dify 端到端耗时）
 
 ## 四、评测方法与局限
 
@@ -69,8 +69,8 @@
 - **越界拒答率**：以回复是否包含明确拒答表述为准；同时记录 top-1 检索得分（应 < 0.1，即检索层面也未命中）。
 - **答案可溯源率**：把回答里**模型自己标成代码**的标识符（行内 `` `code` `` 与代码块里的标识符，外加正文里带下划线的 API 名）抽出来，逐个到引用片段正文里做**不区分大小写**的包含匹配，匹配不上的记为「无出处」。它回答的是前三个指标都回答不了的问题：**这段回答本身有没有依据** —— 引对了文档、却顺手编一个文档里没有的参数名，是 RAG 最典型的失败模式。注意它是**代理指标**：能抓出「编 API」，但也会把合法的同义表述、以及片段被截断（`refs` 每段只带前 800 字符）算成缺口。
 - **局限**：关键词命中会漏判「表述不同但正确」的回答；可溯源率只覆盖「回答里确实写了代码实体」的用例（纯文字回答不计入分母）；延迟是端到端墙钟时间、不代表模型自身耗时，且随本次打的接口而变（具体包含什么见上方「接口归属」与验收结论里的延迟说明）。
-- **接口归属**：本报告记录的接口见开头（`http://localhost:3000`）。代理层只做转发与防护，**检索与生成都在 Dify 侧**，所以换代理实例不改检索类指标（命中率 / 相关度 / 可溯源率）；会变的只有**延迟** —— 它随代理所在的网络与实例类型波动（含到 Dify 的公网往返与端到端耗时，不含部署平台的冷启动）。
-- **语料覆盖**：24 条库内用例的 `expect_docs` 合计点到 25 篇文档，语料共 50 篇，其余 25 篇**没有被任何用例要求召回**（它们有时会作为顺带命中的邻居出现在引用里，但没有被专门判过）。因此「引用命中率 100%」的适用范围是这 25 篇，不是全部语料。
+- **接口归属**：本报告记录的接口见开头（`https://fastapi-docs-qa.onrender.com`）。代理层只做转发与防护，**检索与生成都在 Dify 侧**，所以换代理实例不改检索类指标（命中率 / 相关度 / 可溯源率）；会变的只有**延迟** —— 它随代理所在的网络与实例类型波动（含公网往返、免费实例冷启动与 Dify 端到端耗时）。
+- **语料覆盖**：24 条库内用例的 `expect_docs` 合计点到 25 篇文档，语料共 50 篇，其余 25 篇**没有被任何用例要求召回**（它们有时会作为顺带命中的邻居出现在引用里，但没有被专门判过）。因此「引用命中率 95.8%」的适用范围是这 25 篇，不是全部语料。
 
 ### 复现方式
 
@@ -88,5 +88,5 @@ python3 eval/run_eval.py --base http://localhost:3000 --delay 0
 下面这些实体出现在回答里（模型自己把它们标成了代码），但在返回的引用片段正文里找不到出处。
 可能是模型顺手编的 API，也可能是片段被截断、或换了同义写法 —— 建议人工看一眼：
 
+- **c08**：`get`
 - **c17**：`decode`、`encode`
-- **c20**：`content`、`email_file`、`open`
