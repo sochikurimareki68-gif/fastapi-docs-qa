@@ -54,6 +54,7 @@ import time
 import urllib.error
 import urllib.request
 from collections import deque
+from http.client import IncompleteRead
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -646,8 +647,16 @@ class Handler(BaseHTTPRequestHandler):
         try:
             # 一律把「改写结果 + 检索式」下发（前端只在改写成功时显示检索式）
             self._pump_stream(resp, token, query, rewrite_kind, epoch)
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass  # 用户中途关掉页面，正常情况
+        except (OSError, IncompleteRead):
+            # 上游连接中断（Dify 侧超时、TLS 错误、chunked 流没发完等）：
+            # 告知前端，避免页面挂在半截回答上永远等不到结束事件。
+            try:
+                self._sse_send("error", json.dumps(
+                    {"message": "知识库服务连接中断，请稍后重试。"}, ensure_ascii=False))
+            except OSError:
+                pass
         finally:
             resp.close()
             try:

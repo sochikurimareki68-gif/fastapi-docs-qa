@@ -29,6 +29,7 @@ import re
 import time
 import urllib.error
 import urllib.request
+from http.client import HTTPException
 
 # 改写后的检索式最长长度：太长的「改写」通常是模型在自问自答，宁可丢弃
 MAX_QUERY_CHARS = 200
@@ -132,7 +133,7 @@ def rewrite_query(message: str, ssl_context=None) -> tuple[str, str]:
 
     try:
         raw = _call_upstream(message, api_key, ssl_context)
-    except (urllib.error.URLError, OSError, ValueError, KeyError) as exc:
+    except (urllib.error.URLError, OSError, ValueError, KeyError, HTTPException) as exc:
         # flush=True：线上（Render）stdout 是块缓冲的，不刷就看不到这条日志，排查会瞎
         print(f"  ⚠️ 查询改写失败，改用原问题：{exc}", flush=True)
         return message, "fallback"
